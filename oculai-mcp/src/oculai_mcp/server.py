@@ -589,16 +589,17 @@ async def oculai_get_shortlist(
 @mcp.tool
 async def oculai_export_report(
     run_id: str,
-    format: str = "markdown",
+    format: str = "html",
 ) -> dict[str, Any]:
-    """Export a sourcing run report in Markdown or HTML format.
+    """Export a sourcing run report in HTML (default) or Markdown format.
 
-    Includes: run metadata, strategy summary, task summary, candidate
-    rankings with dimension scores and evidence counts.
+    The HTML format is the primary deliverable: a polished, self-contained
+    visual dashboard with score charts, candidate cards, and evidence
+    summaries. The Markdown format is available for plain-text use cases.
 
     Args:
         run_id: The run UUID
-        format: "markdown" (default) or "html"
+        format: "html" (default) or "markdown"
     """
     from uuid import UUID
     return await report.export_report(

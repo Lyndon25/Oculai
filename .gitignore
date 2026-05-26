@@ -42,3 +42,11 @@ htmlcov/
 
 # Claude Code
 .claude/
+
+# Project planning docs (keep local)
+Agent-Native架构调研与初始建议.md
+工具和基建.md
+项目概述.md
+
+# Test workspace (temp/test/ — e2e test artifacts, not tracked)
+temp/

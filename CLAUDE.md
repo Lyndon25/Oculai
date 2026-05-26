@@ -121,6 +121,93 @@ Valid assessment dimensions are domain-constrained: `academic`, `engineering`, `
 ### Human approval gate
 All external actions (outreach, data export) must pass through `request_human_approval`. The system **never sends messages autonomously**. Outreach drafts are created with `create_outreach_draft` and blocked until a human approves via the database.
 
+## Testing Specification
+
+The project is tested exclusively through **end-to-end full-pipeline runs**. There are no unit tests or integration tests — every test is a complete sourcing run through the skill pipeline.
+
+### Test Directory Structure
+
+```
+temp/                       # gitignored — all test artifacts live here
+└── test/
+    ├── 001-ml-engineer/    # Test round 1
+    ├── 002-nlp-scientist/  # Test round 2
+    ├── 003-.../            # Test round 3+
+    └── ...
+```
+
+Each test round creates a **numbered subdirectory** under `temp/test/` (zero-padded 3-digit prefix). The directory contains all process artifacts and deliverables for that round.
+
+**Per-round contents:**
+- `jd.md` — the crafted JD for this round
+- `output.html` — the final polished HTML report (primary deliverable)
+- `test-report.html` — a polished HTML test report describing the test execution, results summary, and any issues found
+- `artifacts/` — intermediate outputs (agent outputs, plan snapshots, search results)
+
+### Test Protocol
+
+**1. Each round requires a fresh JD**
+
+Before every test run, draft a new JD targeting a different domain or role from previous rounds. Rotate across categories:
+
+| Category | Example Roles |
+|---|---|
+| AI/ML Research | NLP Scientist, CV Researcher, RL Engineer, LLM Alignment Researcher |
+| Systems/Infra | Distributed Systems Engineer, Database Engineer, SRE, Platform Engineer |
+| Full-Stack/Product | Frontend Architect, Backend Engineer, Mobile Developer, DevTools Engineer |
+| Cross-Domain | Bioinformatics Researcher, Quantitative Trader, Robotics Engineer, Chip Designer |
+
+The JD must include: role title, company context, required skills, nice-to-haves, seniority level, and location preference.
+
+**2. Execute the full skill pipeline**
+
+Run the complete pipeline as defined in `oculai/skills/oculai-talent-sourcing/SKILL.md`:
+
+```
+1. oculai_create_run
+2. oculai_list_source_capabilities
+3. Launch Search Strategist subagent
+4. oculai_checkpoint_plan
+5. Launch Source Researchers (parallel)
+6. oculai_upsert_candidate (per candidate)
+7. Launch Identity Resolver
+8. Launch Profile Enricher
+9. Launch Fit Evaluator
+10. Launch Quality Auditor
+11. oculai_export_report (format=html)
+12. (optional) Launch Outreach Strategist
+13. Present results
+```
+
+**3. Save all deliverables**
+
+After the pipeline completes:
+- Write `output.html` from `oculai_export_report` result to the test round directory
+- Write `test-report.html` summarizing: JD used, candidates found, scores distribution, pipeline performance, issues/regressions, and observations
+- Save any notable intermediate outputs to `artifacts/`
+
+**4. Test report format**
+
+The `test-report.html` is a polished, self-contained HTML file (same design philosophy as the main deliverable) containing:
+
+| Section | Content |
+|---|---|
+| Header | Test round number, role, date, run status |
+| JD | The full job description used |
+| Pipeline Summary | Steps completed, timing per phase, task counts |
+| Candidate Overview | Ranking table with scores, evidence counts |
+| Quality Assessment | Auditor findings, bias risks, data gaps |
+| Issues & Observations | What went wrong, what was surprising, regressions |
+| Source Performance | Per-source: query strategy, results returned, quality |
+
+### Pre-Test Checklist
+
+Before starting a test run:
+- [ ] PostgreSQL is running (`cd oculai-db && docker compose up -d`)
+- [ ] MCP server is connectable
+- [ ] New JD is drafted and saved to `temp/test/<NNN>-<name>/jd.md`
+- [ ] Test round directory is created with `artifacts/` subdirectory
+
 ## Directory Map
 
 | Directory | Purpose |
