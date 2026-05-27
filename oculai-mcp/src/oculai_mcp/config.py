@@ -5,7 +5,11 @@ import time
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Absolute path to .env so it works regardless of cwd
+# config.py is at src/oculai_mcp/config.py, .env is at oculai-mcp/.env
+_ENV_FILE_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
 
 
 class Settings(BaseSettings):
@@ -37,7 +41,9 @@ class Settings(BaseSettings):
         """Alias for semantic_scholar_api_key used by Semantic Scholar source."""
         return self.semantic_scholar_api_key
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = SettingsConfigDict(
+        env_file=str(_ENV_FILE_PATH), env_file_encoding="utf-8"
+    )
 
 
 _settings_cache: tuple[float, Settings] | None = None
@@ -46,7 +52,7 @@ _settings_cache: tuple[float, Settings] | None = None
 def get_settings() -> Settings:
     """Return cached Settings, reload if .env mtime changed."""
     global _settings_cache
-    env_file = Path(".env")
+    env_file = _ENV_FILE_PATH
     if env_file.exists():
         mtime = env_file.stat().st_mtime
         if _settings_cache is None or _settings_cache[0] < mtime:

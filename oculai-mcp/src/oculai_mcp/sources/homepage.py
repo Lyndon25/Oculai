@@ -155,6 +155,7 @@ class PersonalHomepageSource(IDataSource):
         domain = urlparse(url).netloc
         institution = None
         domain_institution_map = {
+            # Western universities
             "csail.mit.edu": "MIT CSAIL",
             "cs.stanford.edu": "Stanford University",
             "eecs.berkeley.edu": "UC Berkeley",
@@ -174,6 +175,28 @@ class PersonalHomepageSource(IDataSource):
             "cam.ac.uk": "University of Cambridge",
             "ethz.ch": "ETH Zurich",
             "epfl.ch": "EPFL",
+            # Chinese universities (C9 League + major institutions)
+            "tsinghua.edu.cn": "Tsinghua University (清华大学)",
+            "pku.edu.cn": "Peking University (北京大学)",
+            "sjtu.edu.cn": "Shanghai Jiao Tong University (上海交通大学)",
+            "zju.edu.cn": "Zhejiang University (浙江大学)",
+            "ustc.edu.cn": "University of Science and Technology of China (中国科学技术大学)",
+            "fudan.edu.cn": "Fudan University (复旦大学)",
+            "nju.edu.cn": "Nanjing University (南京大学)",
+            "hit.edu.cn": "Harbin Institute of Technology (哈尔滨工业大学)",
+            "xjtu.edu.cn": "Xi'an Jiaotong University (西安交通大学)",
+            "buaa.edu.cn": "Beihang University (北京航空航天大学)",
+            "bit.edu.cn": "Beijing Institute of Technology (北京理工大学)",
+            "nudt.edu.cn": "National University of Defense Technology (国防科技大学)",
+            "whu.edu.cn": "Wuhan University (武汉大学)",
+            "hust.edu.cn": "Huazhong University of Science and Technology (华中科技大学)",
+            "tongji.edu.cn": "Tongji University (同济大学)",
+            "scu.edu.cn": "Sichuan University (四川大学)",
+            "seu.edu.cn": "Southeast University (东南大学)",
+            # Chinese CS-specific subdomains
+            "iiis.tsinghua.edu.cn": "Tsinghua IIIS (清华交叉信息研究院)",
+            "keg.cs.tsinghua.edu.cn": "Tsinghua KEG (清华知识工程组)",
+            "eecs.pku.edu.cn": "Peking University EECS (北大信科)",
         }
         for domain_key, inst_name in domain_institution_map.items():
             if domain_key in domain:

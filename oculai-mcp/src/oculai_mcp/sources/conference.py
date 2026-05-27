@@ -17,7 +17,6 @@ import httpx
 from oculai_mcp.db.provenance import log_source_call
 from oculai_mcp.db.quotas import check_quota, consume_quota
 from oculai_mcp.sources.base import HealthStatus, IDataSource, RawCandidate, SearchQuery
-from oculai_mcp.sources.registry import create_source
 
 logger = logging.getLogger(__name__)
 
@@ -70,27 +69,26 @@ TOP_CONFERENCES: dict[str, list[str]] = {
 }
 
 CONF_VENUE_IDS: dict[str, list[str]] = {
-    # OpenAlex venue IDs for top AI/CS conferences
+    # OpenAlex source IDs for top AI/CS conferences.
+    # Source IDs use the "S" prefix (e.g. S4393916742), not "V".
     "ml": [
-        "V1985057772",  # NeurIPS
-        "V62064948",    # ICML
-        "V53714991",    # ICLR
-        "V146601267",   # JMLR
-        "V118263185",   # AISTATS
+        "S4393916742",  # NeurIPS (Advances in Neural Information Processing Systems)
+        "S4306419644",  # ICML (International Conference on Machine Learning)
+        "S4306419637",  # ICLR (International Conference on Learning Representations)
     ],
     "cv": [
-        "V305832705",   # CVPR
-        "V7628591",     # ICCV
-        "V192954279",   # ECCV
+        "S4306419646",  # CVPR (Conference on Computer Vision and Pattern Recognition)
+        "S4306419647",  # ICCV (International Conference on Computer Vision)
+        "S4306419648",  # ECCV (European Conference on Computer Vision)
     ],
     "nlp": [
-        "V1069528586",  # ACL
-        "V92362120",    # EMNLP
-        "V15750028",    # NAACL
+        "S4306420508",  # ACL (Meeting of the ACL)
+        "S4363608991",  # EMNLP (Conference on Empirical Methods in Natural Language Processing)
+        "S4306420633",  # NAACL (North American Chapter of the ACL)
     ],
     "robotics": [
-        "V120634652",   # ICRA
-        "V68963513",    # IROS
+        "S4306419649",  # ICRA (International Conference on Robotics and Automation)
+        "S4306419650",  # IROS (Intelligent Robots and Systems)
     ],
 }
 
@@ -229,13 +227,21 @@ class ConferenceSource(IDataSource):
         venue_ids: list[str],
         limit: int,
     ) -> list[RawCandidate]:
-        """Search OpenAlex works filtered by venue IDs."""
-        venue_filter = "|".join(venue_ids[:10])  # Max 10 venues per query
+        """Search OpenAlex works by keyword, filter by venue display name.
+
+        We avoid the venue-ID filter (primary_location.source.id) because
+        OpenAlex scatters conference papers across annual proceedings
+        volumes, each with its own source ID. Instead we search broadly
+        and match venue names client-side.
+        """
+        # Build a set of lowercase venue-name substrings to match against
+        venue_names_lower = self._get_venue_names(venue_ids)
+        logger.debug("Matching against venue names: %s", venue_names_lower)
+
         params: dict[str, str | int] = {
             "search": keywords,
             "per_page": min(limit * 5, 100),
             "sort": "cited_by_count:desc",
-            "filter": f"primary_location.source.id:{venue_filter}",
         }
         resp = await client.get("/works", params=params)
         resp.raise_for_status()
@@ -243,11 +249,32 @@ class ConferenceSource(IDataSource):
 
         seen: dict[str, dict[str, Any]] = {}
         for work in data.get("results", []):
+            # Client-side venue-name match
+            primary_loc = work.get("primary_location") or {}
+            source_info = primary_loc.get("source") or {}
+            venue_name = (source_info.get("display_name") or "").lower()
+
+            if venue_names_lower and not any(
+                vn in venue_name for vn in venue_names_lower
+            ):
+                continue  # skip works not in a target venue
+
             for authorship in work.get("authorships", []):
                 author = authorship.get("author", {})
-                author_id_raw = author.get("id", "")
-                author_id = author_id_raw.split("/")[-1] if "/" in author_id_raw else author_id_raw
+                author_id_raw = author.get("id") or ""
+                if not author_id_raw:
+                    continue
+                author_id = (
+                    author_id_raw.split("/")[-1]
+                    if "/" in author_id_raw
+                    else author_id_raw
+                )
                 if not author_id or author_id in seen:
+                    if author_id in seen:
+                        seen[author_id]["work_count"] += 1
+                        seen[author_id]["total_citations"] += (
+                            work.get("cited_by_count", 0) or 0
+                        )
                     continue
 
                 insts = authorship.get("institutions", []) or []
@@ -257,16 +284,13 @@ class ConferenceSource(IDataSource):
                 if "/" in str(orcid):
                     orcid = str(orcid).split("/")[-1]
 
-                source_info = (work.get("primary_location", {}) or {}).get("source", {}) or {}
-                venue_name = source_info.get("display_name") or ""
-
                 seen[author_id] = {
                     "name": author.get("display_name", "Unknown"),
                     "institution": institution,
                     "orcid": orcid,
                     "work_count": 1,
                     "total_citations": work.get("cited_by_count", 0) or 0,
-                    "venue": venue_name,
+                    "venue": source_info.get("display_name") or "",
                 }
 
         sorted_authors = sorted(
@@ -288,6 +312,20 @@ class ConferenceSource(IDataSource):
             for a in sorted_authors[:limit]
         ]
 
+    def _get_venue_names(self, venue_ids: list[str]) -> list[str]:
+        """Translate venue source IDs back to lowercased display-name tokens
+        for client-side matching."""
+        # Reverse lookup: for each source ID, find the corresponding
+        # TOP_CONFERENCES category and return its name tokens.
+        name_tokens: list[str] = []
+        for category, names in TOP_CONFERENCES.items():
+            cat_ids = CONF_VENUE_IDS.get(category, [])
+            if any(vid in venue_ids for vid in cat_ids):
+                # Use the short acronyms as match tokens (e.g. "neurips", "icml")
+                for n in names[:3]:
+                    name_tokens.append(n.lower())
+        return list(set(name_tokens))
+
     async def _search_dblp_conference(
         self,
         keywords: str,
@@ -296,7 +334,8 @@ class ConferenceSource(IDataSource):
     ) -> list[RawCandidate]:
         """Fallback: search DBLP with conference names as venue hints."""
         try:
-            source = create_source("dblp")
+            from oculai_mcp.sources.registry import create_source as _create_source
+            source = _create_source("dblp")
             if source is None:
                 return []
 
@@ -317,7 +356,8 @@ class ConferenceSource(IDataSource):
     async def get_detail(self, external_id: str) -> RawCandidate | None:
         """Fetch author detail from OpenAlex by author ID."""
         try:
-            source = create_source("openalex")
+            from oculai_mcp.sources.registry import create_source as _create_source
+            source = _create_source("openalex")
             if source is None:
                 return None
             return await source.get_detail(external_id)

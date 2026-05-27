@@ -310,9 +310,19 @@ class GitHubAPISource(IDataSource):
         """Fetch detailed GitHub user profile."""
         start = time.perf_counter()
 
+        # Normalize external_id: strip URL prefixes, extract login from full URLs
+        login = external_id
+        if "/" in login:
+            # Could be https://github.com/username or just username
+            login = login.rstrip("/").split("/")[-1]
+        login = login.strip()
+        if not login:
+            logger.warning("GitHub get_detail received empty login")
+            return None
+
         try:
             client = await self._get_client()
-            resp = await client.get(f"/users/{external_id}")
+            resp = await client.get(f"/users/{login}")
             resp.raise_for_status()
             data = resp.json()
 
@@ -326,14 +336,14 @@ class GitHubAPISource(IDataSource):
                 records_count=1,
             )
 
-            name = data.get("name") or data.get("login") or external_id
+            name = data.get("name") or data.get("login") or login
             company = data.get("company")
             if company:
                 company = company.strip().lstrip("@")
 
             return RawCandidate(
                 name=name,
-                github_id=external_id,
+                github_id=login,
                 institution=company,
                 profile_url=data.get("html_url"),
                 raw_metadata={
@@ -350,13 +360,13 @@ class GitHubAPISource(IDataSource):
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
-                logger.warning("GitHub user not found: %s", external_id)
+                logger.warning("GitHub user not found: %s", login)
                 return None
             logger.error("GitHub API detail failed: HTTP %s", e.response.status_code)
             return None
 
         except Exception:
-            logger.exception("GitHub API detail failed for %s", external_id)
+            logger.exception("GitHub API detail failed for %s", login)
             return None
 
     async def check_health(self) -> HealthStatus:

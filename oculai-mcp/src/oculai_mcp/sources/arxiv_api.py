@@ -206,12 +206,15 @@ class ArxivAPISource(IDataSource):
             logger.error("Failed to parse arXiv XML: %s", e)
             return []
 
-        # Map: author_name -> {paper_count, papers: [], institution: str | None}
+        # Map: author_name -> {paper_count, papers: [], institution: str | None, categories: [], co_authors: set}
         authors: dict[str, dict[str, Any]] = {}
 
         for entry in root.findall("atom:entry", NAMESPACES):
             title_el = entry.find("atom:title", NAMESPACES)
             title = title_el.text.strip() if title_el is not None and title_el.text else ""
+
+            summary_el = entry.find("atom:summary", NAMESPACES)
+            summary = summary_el.text.strip() if summary_el is not None and summary_el.text else ""
 
             published_el = entry.find("atom:published", NAMESPACES)
             year = 0
@@ -225,6 +228,28 @@ class ArxivAPISource(IDataSource):
                 start_year, end_year = year_filter
                 if not (start_year <= year <= end_year):
                     continue
+
+            # Extract arXiv primary category and all categories
+            primary_cat = ""
+            categories: list[str] = []
+            for cat_el in entry.findall("atom:category", NAMESPACES):
+                term = cat_el.get("term", "")
+                if term:
+                    categories.append(term)
+            if not categories:
+                # Try arxiv:primary_category
+                pc_el = entry.find("arxiv:primary_category", NAMESPACES)
+                if pc_el is not None:
+                    primary_cat = pc_el.get("term", "")
+                    if primary_cat:
+                        categories.append(primary_cat)
+
+            # Collect all authors on this paper for co-author tracking
+            paper_authors: list[str] = []
+            for author_el in entry.findall("atom:author", NAMESPACES):
+                name_el = author_el.find("atom:name", NAMESPACES)
+                if name_el is not None and name_el.text:
+                    paper_authors.append(name_el.text.strip())
 
             for author_el in entry.findall("atom:author", NAMESPACES):
                 name_el = author_el.find("atom:name", NAMESPACES)
@@ -241,10 +266,24 @@ class ArxivAPISource(IDataSource):
                         "paper_count": 0,
                         "papers": [],
                         "institution": institution,
+                        "categories": [],
+                        "co_authors": set(),
+                        "summaries": [],
                     }
 
                 authors[name]["paper_count"] += 1
-                authors[name]["papers"].append({"title": title, "year": year})
+                authors[name]["papers"].append({
+                    "title": title,
+                    "year": year,
+                    "categories": categories,
+                    "summary": summary[:500] if summary else "",
+                })
+                authors[name]["categories"].extend(categories)
+                authors[name]["summaries"].append(summary[:300] if summary else "")
+                # Add co-authors (other authors on same paper)
+                for coa in paper_authors:
+                    if coa != name:
+                        authors[name]["co_authors"].add(coa)
 
                 # Keep the first non-empty institution we see.
                 if institution and not authors[name]["institution"]:
@@ -257,7 +296,14 @@ class ArxivAPISource(IDataSource):
 
         candidates = []
         for name, data in sorted_authors[:limit]:
-            research_areas = self._extract_research_areas(data["papers"])
+            research_areas = self._extract_research_areas(
+                data["papers"], data.get("summaries", [])
+            )
+            # Deduplicate and count categories
+            cat_counts: dict[str, int] = {}
+            for c in data.get("categories", []):
+                cat_counts[c] = cat_counts.get(c, 0) + 1
+            top_categories = sorted(cat_counts.items(), key=lambda x: x[1], reverse=True)[:5]
 
             candidates.append(
                 RawCandidate(
@@ -270,8 +316,14 @@ class ArxivAPISource(IDataSource):
                     raw_metadata={
                         "source": "arxiv_api",
                         "recent_papers": data["papers"][:5],
+                        "top_categories": [c[0] for c in top_categories],
+                        "category_counts": dict(top_categories),
+                        "co_authors_sample": sorted(data.get("co_authors", set()))[:10],
+                        "co_author_count": len(data.get("co_authors", set())),
                         "data_quality_note": (
-                            "Aggregated from paper search; h-index and citations not available from arXiv"
+                            "Aggregated from arXiv paper search. h-index and citation counts "
+                            "are not available from arXiv; use Semantic Scholar or OpenAlex "
+                            "for bibliometric enrichment."
                         ),
                     },
                 )
@@ -279,13 +331,16 @@ class ArxivAPISource(IDataSource):
 
         return candidates
 
-    def _extract_research_areas(self, papers: list[dict[str, Any]]) -> list[str]:
-        """Simple heuristic: extract common CS keywords from paper titles."""
+    def _extract_research_areas(
+        self, papers: list[dict[str, Any]], summaries: list[str] | None = None
+    ) -> list[str]:
+        """Extract research areas from paper titles, categories, and abstracts."""
         keywords = {
             "nlp": "natural_language_processing",
-            "language": "natural_language_processing",
+            "language model": "large_language_models",
             "transformer": "deep_learning",
             "llm": "large_language_models",
+            "large language": "large_language_models",
             "vision": "computer_vision",
             "image": "computer_vision",
             "reinforcement": "reinforcement_learning",
@@ -298,9 +353,24 @@ class ArxivAPISource(IDataSource):
             "diffusion": "generative_models",
             "retrieval": "information_retrieval",
             "recommendation": "recommendation_systems",
+            "inference": "llm_inference",
+            "serving": "llm_inference",
+            "quantization": "model_quantization",
+            "speculative": "speculative_decoding",
+            "batching": "llm_inference",
+            "attention": "transformer_architecture",
+            "cuda": "gpu_acceleration",
+            "kernel": "gpu_acceleration",
+            "distributed": "distributed_systems",
         }
         found: set[str] = set()
         text = " ".join(p.get("title", "").lower() for p in papers)
+        # Also include arXiv categories (e.g., cs.CL, cs.LG, cs.CV)
+        for p in papers:
+            for cat in p.get("categories", []):
+                text += " " + cat.lower()
+        if summaries:
+            text += " " + " ".join(s.lower() for s in summaries)
         for kw, area in keywords.items():
             if kw in text:
                 found.add(area)

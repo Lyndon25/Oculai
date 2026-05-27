@@ -44,9 +44,17 @@ htmlcov/
 .claude/
 
 # Project planning docs (keep local)
-Agent-Native架构调研与初始建议.md
+多Agent架构调研与初始建议.md
 工具和基建.md
 项目概述.md
 
 # Test workspace (temp/test/ — e2e test artifacts, not tracked)
 temp/
+
+# Local MCP configuration
+.mcp.json
+
+# Test runner scripts (development only)
+oculai-mcp/run_test_*.py
+oculai-mcp/run_pipeline.py
+oculai-mcp/mcp_call.py

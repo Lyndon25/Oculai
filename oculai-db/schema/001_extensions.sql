@@ -1,5 +1,5 @@
 -- 001_extensions.sql
--- Required PostgreSQL extensions for Oculai Agent-Native Database.
+-- Required PostgreSQL extensions for Oculai multi-Agent Database.
 
 -- For pgvector < 0.5.0, the extension name is "vector"; for >= 0.5.0 it's "pgvector".
 -- Try both so the schema works regardless of installed version.

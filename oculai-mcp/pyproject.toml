@@ -1,7 +1,7 @@
 [project]
 name = "oculai-mcp"
 version = "0.1.0"
-description = "Oculai Agent-Native Talent Sourcing MCP Server"
+description = "Oculai Multi-Agent Talent Sourcing MCP Server"
 requires-python = ">=3.11"
 dependencies = [
     "fastmcp>=2.0.0",

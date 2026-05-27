@@ -63,7 +63,11 @@ def _register_api_sources() -> None:
         from oculai_mcp.sources.industry_source import IndustrySource
         from oculai_mcp.sources.conference import ConferenceSource
         from oculai_mcp.sources.baidu import BaiduScholarSource, BaiduSearchSource
+        from oculai_mcp.sources.baidu_qianfan import BaiduQianfanSource
         from oculai_mcp.sources.homepage import PersonalHomepageSource
+        from oculai_mcp.sources.juejin import JuejinSource
+        from oculai_mcp.sources.zhihu import ZhihuSource
+        from oculai_mcp.sources.csdn import CSDNSource
 
         register_source("arxiv", ArxivAPISource)
         register_source("dblp", DblpAPISource)
@@ -74,10 +78,15 @@ def _register_api_sources() -> None:
         register_source("conference", ConferenceSource)
         register_source("baidu_scholar", BaiduScholarSource)
         register_source("baidu", BaiduSearchSource)
+        register_source("baidu_qianfan", BaiduQianfanSource)
         register_source("personal_homepage", PersonalHomepageSource)
+        register_source("juejin", JuejinSource)
+        register_source("zhihu", ZhihuSource)
+        register_source("csdn", CSDNSource)
         logger.info(
             "Registered sources: arxiv, dblp, github, semantic_scholar, openalex, "
-            "industry, conference, baidu_scholar, baidu, personal_homepage"
+            "industry, conference, baidu_scholar, baidu, baidu_qianfan, personal_homepage, "
+            "juejin, zhihu, csdn"
         )
     except ImportError as e:
         logger.warning("Some sources unavailable: %s", e)

@@ -1,5 +1,5 @@
 -- 006_functions.sql
--- Stored functions for Agent-Native DAG task operations.
+-- Stored functions for multi-Agent DAG task operations.
 -- Phase-era queue functions removed. New DAG task claim/complete/fail added.
 
 -- ============================================================

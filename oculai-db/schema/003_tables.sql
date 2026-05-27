@@ -1,5 +1,5 @@
 -- 003_tables.sql
--- Core tables for Oculai Agent-Native Database.
+-- Core tables for Oculai multi-Agent Database.
 -- Phase columns removed. DAG-based Plan/Task model replaces fixed pipeline.
 -- All tables share audit columns: created_at, updated_at, created_by_agent, updated_by_agent, data_version.
 

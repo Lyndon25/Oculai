@@ -10,10 +10,11 @@ Covers 250M+ scholarly works, 90M+ authors, institutions, topics, etc.
 import asyncio
 import logging
 import time
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 import httpx
 
+from oculai_mcp.config import get_settings
 from oculai_mcp.db.provenance import log_source_call
 from oculai_mcp.db.quotas import check_quota, consume_quota
 from oculai_mcp.sources.base import HealthStatus, IDataSource, RawCandidate, SearchQuery
@@ -22,8 +23,26 @@ logger = logging.getLogger(__name__)
 
 OA_API_BASE = "https://api.openalex.org"
 
-# Polite User-Agent as recommended by OpenAlex docs
-USER_AGENT = "Oculai-TalentBot/1.0 (mailto:contact@oculai.ai)"
+T = TypeVar("T")
+
+
+async def _with_retry(
+    coro: Callable[[], Any],
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+    retryable: tuple[type, ...] = (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError),
+) -> Any:
+    """Execute coroutine with exponential backoff retry."""
+    last_exc: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            return await coro()
+        except retryable as e:
+            last_exc = e
+            delay = base_delay * (2 ** attempt)
+            logger.warning("OpenAlex request failed (%s), retrying in %.1fs...", e, delay)
+            await asyncio.sleep(delay)
+    raise last_exc or RuntimeError("Retry exhausted")
 
 
 class OpenAlexAPISource(IDataSource):
@@ -56,14 +75,18 @@ class OpenAlexAPISource(IDataSource):
     rate_limit_notes = "100k calls/day (free). Polite use requested: set mailto in User-Agent."
 
     def __init__(self) -> None:
+        settings = get_settings()
+        email = settings.openalex_email or "contact@oculai.ai"
+        self._user_agent = f"Oculai-TalentBot/1.0 (mailto:{email})"
         self._client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
             self._client = httpx.AsyncClient(
                 base_url=OA_API_BASE,
-                headers={"User-Agent": USER_AGENT},
-                timeout=30.0,
+                headers={"User-Agent": self._user_agent},
+                timeout=httpx.Timeout(30.0, connect=10.0),
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
             )
         return self._client
 
@@ -143,7 +166,7 @@ class OpenAlexAPISource(IDataSource):
             if filter_parts:
                 params["filter"] = ",".join(filter_parts)
 
-        resp = await client.get("/works", params=params)
+        resp = await _with_retry(lambda: client.get("/works", params=params))
         resp.raise_for_status()
         data = resp.json()
         return data.get("results", [])
@@ -207,7 +230,7 @@ class OpenAlexAPISource(IDataSource):
 
         async def _fetch_one(a: dict[str, Any]) -> RawCandidate | None:
             try:
-                resp = await client.get(f"/authors/{a['id']}")
+                resp = await _with_retry(lambda: client.get(f"/authors/{a['id']}"))
                 resp.raise_for_status()
                 detail = resp.json()
             except Exception:
@@ -292,7 +315,7 @@ class OpenAlexAPISource(IDataSource):
             "search": keywords,
             "per_page": min(query.limit, 200),
         }
-        resp = await client.get("/authors", params=params)
+        resp = await _with_retry(lambda: client.get("/authors", params=params))
         resp.raise_for_status()
         data = resp.json()
 
@@ -344,7 +367,7 @@ class OpenAlexAPISource(IDataSource):
 
         try:
             client = await self._get_client()
-            resp = await client.get(f"/authors/{external_id}")
+            resp = await _with_retry(lambda: client.get(f"/authors/{external_id}"))
             resp.raise_for_status()
             detail = resp.json()
 
@@ -410,7 +433,11 @@ class OpenAlexAPISource(IDataSource):
         start = time.perf_counter()
         try:
             client = await self._get_client()
-            resp = await client.get("/works", params={"search": "test", "per_page": 1})
+            resp = await _with_retry(
+                lambda: client.get("/works", params={"search": "test", "per_page": 1}),
+                max_retries=2,
+                base_delay=0.5,
+            )
             resp.raise_for_status()
             latency_ms = (time.perf_counter() - start) * 1000
             return HealthStatus(healthy=True, latency_ms=latency_ms)

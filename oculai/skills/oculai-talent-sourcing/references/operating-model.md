@@ -2,7 +2,7 @@
 
 ## System Architecture
 
-Oculai is an Agent-Native multi-agent talent sourcing system:
+Oculai is a multi-Agent collaborative talent sourcing system:
 
 ```
 Claude Code Main Agent (You)

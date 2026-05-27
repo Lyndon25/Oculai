@@ -103,36 +103,50 @@ async def export_report(run_id: UUID, format: str = "html") -> dict[str, Any]:
 
 
 def _render_markdown(report: dict[str, Any]) -> str:
-    """Render report as Markdown."""
+    """Render report as Markdown (Chinese)."""
     r = report["run"]
+    candidates = report["candidates"]
+    shortlisted = sum(1 for c in candidates if c["status"] == "shortlisted")
+    avg_score = (
+        sum(c["overall_score"] or 0 for c in candidates) / len(candidates)
+        if candidates else 0
+    )
+
     lines = [
         f"# {r['title']}",
         f"",
-        f"**Status**: {r['status']} | **Created**: {r['created_at']}",
+        f"**状态**: {r['status']} | **创建时间**: {r['created_at']}",
         f"",
-        f"## Strategy",
+        f"## 执行概览",
         f"",
-        f"{report['plan'].get('strategy_summary', 'No strategy recorded.')}",
+        f"- 候选人总数: {len(candidates)}",
+        f"- 已入围: {shortlisted}",
+        f"- 平均综合评分: {avg_score:.0f}",
         f"",
-        f"## Task Summary",
+        f"## 搜索策略",
+        f"",
+        f"{report['plan'].get('strategy_summary', '未记录搜索策略。')}",
+        f"",
+        f"## 任务汇总",
         f"",
     ]
     for t in report["task_summary"]:
         lines.append(f"- {t['task_type']}: {t['cnt']} ({t['status']})")
 
-    lines.extend(["", "## Candidates", ""])
-    for i, c in enumerate(report["candidates"], 1):
+    lines.extend(["", "## 候选人详情", ""])
+    for i, c in enumerate(candidates, 1):
         lines.extend([
-            f"### {i}. {c['name']} — Score: {c['overall_score']}/100",
+            f"### {i}. {c['name']} — 综合评分: {c['overall_score']}/100",
             f"",
-            f"- **Institution**: {c['institution'] or 'N/A'}",
-            f"- **h-index**: {c['h_index']} | **Citations**: {c['total_citations']} | **Papers**: {c['total_papers']}",
-            f"- **Status**: {c['status']} | **Evidence items**: {c['evidence_count']}",
+            f"- **机构**: {c['institution'] or '—'}",
+            f"- **H-Index**: {c['h_index']} | **被引次数**: {c['total_citations']} | **论文数**: {c['total_papers']}",
+            f"- **状态**: {c['status']} | **证据条目**: {c['evidence_count']}",
         ])
         if c["dimension_scores"]:
-            lines.append("- **Scores**:")
+            lines.append("- **维度评分**:")
             for dim, s in c["dimension_scores"].items():
-                lines.append(f"  - {dim}: {s['score']}/10 (confidence: {s['confidence']})")
+                dim_name = _DIM_LABELS.get(dim, dim)
+                lines.append(f"  - {dim_name}: {s['score']}/10 (置信度: {s['confidence']:.0%})")
         lines.append("")
 
     return "\n".join(lines)
@@ -143,228 +157,570 @@ def _render_markdown(report: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 _CSS = r"""
+/* ========================================================================
+   Oculai Report — Swiss Precision / Modern Flat Premium
+   Flat, geometric, restrained elegance. Light interface. Thin 1px borders.
+   ======================================================================== */
+
 :root {
-    --bg: #f5f6fa;
-    --card-bg: #ffffff;
-    --text: #1a1a2e;
-    --text-secondary: #6b7280;
-    --border: #e5e7eb;
+    /* Base */
+    --bg: #f6f6f4;
+    --surface: #ffffff;
+    --surface-raised: #fafaf9;
+    --text: #0f172a;
+    --text-secondary: #64748b;
+    --text-muted: #94a3b8;
+    --border: #e2e8f0;
+    --border-strong: #cbd5e1;
+    --grid-line: rgba(148,163,184,0.12);
+
+    /* Accent — single disciplined indigo family */
     --accent: #4f46e5;
-    --accent-light: #eef2ff;
-    --green: #10b981;
-    --green-bg: #ecfdf5;
-    --yellow: #f59e0b;
-    --yellow-bg: #fffbeb;
-    --orange: #f97316;
-    --orange-bg: #fff7ed;
-    --red: #ef4444;
-    --red-bg: #fef2f2;
-    --radius: 10px;
-    --shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
-    --shadow-md: 0 4px 12px rgba(0,0,0,.06);
+    --accent-soft: #e0e7ff;
+    --accent-text: #3730a3;
+
+    /* Semantic — flat, no pastels */
+    --good: #059669;
+    --good-soft: #d1fae5;
+    --warn: #d97706;
+    --warn-soft: #fef3c7;
+    --caution: #ea580c;
+    --caution-soft: #ffedd5;
+    --bad: #dc2626;
+    --bad-soft: #fee2e2;
+
+    --radius: 6px;
+    --radius-sm: 3px;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+html { scroll-behavior: smooth; }
+
 body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-                 "Helvetica Neue", Arial, "Noto Sans SC", "PingFang SC",
-                 "Microsoft YaHei", sans-serif;
+    font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei",
+                 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", sans-serif;
     background: var(--bg);
     color: var(--text);
-    line-height: 1.6;
+    line-height: 1.65;
     -webkit-font-smoothing: antialiased;
+    font-size: 14px;
 }
 
-.container { max-width: 1100px; margin: 0 auto; padding: 32px 24px 64px; }
+/* Subtle dot-grid texture on body */
+body::before {
+    content: "";
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image: radial-gradient(circle, var(--grid-line) 0.6px, transparent 0.6px);
+    background-size: 24px 24px;
+}
 
-/* ---- Header ---- */
-.header {
-    background: linear-gradient(135deg, #312e81 0%, #4f46e5 50%, #7c3aed 100%);
-    color: #fff;
-    padding: 40px 48px;
+.container {
+    position: relative; z-index: 1;
+    max-width: 1200px; margin: 0 auto;
+    padding: 40px 32px 80px;
+}
+
+/* ========================================================================
+   Typography
+   ======================================================================== */
+
+h1, h2, h3, h4 {
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.25;
+}
+
+.mono {
+    font-family: "SF Mono", "JetBrains Mono", "Fira Code", "Consolas", monospace;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+}
+
+/* ========================================================================
+   Header
+   ======================================================================== */
+
+.report-header {
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
-    margin-bottom: 28px;
-    box-shadow: var(--shadow-md);
+    padding: 36px 40px;
+    margin-bottom: 24px;
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 24px; flex-wrap: wrap;
 }
-.header h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
-.header .meta {
-    display: flex; gap: 24px; margin-top: 12px;
-    font-size: 14px; opacity: 0.85; flex-wrap: wrap;
-}
-.header .meta span { display: flex; align-items: center; gap: 6px; }
-.header .badge {
-    display: inline-block; padding: 3px 12px; border-radius: 99px;
-    font-size: 12px; font-weight: 600; letter-spacing: 0.3px;
-    text-transform: uppercase;
-}
-.badge-active { background: rgba(255,255,255,.2); color: #fff; }
-.badge-done   { background: var(--green); color: #fff; }
-.badge-draft  { background: rgba(255,255,255,.15); color: #fff; }
 
-/* ---- Section cards ---- */
-.section {
-    background: var(--card-bg);
+.report-header .brand {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--accent);
+    margin-bottom: 10px;
+}
+
+.report-header h1 {
+    font-size: 30px; font-weight: 800;
+    color: var(--text); max-width: 700px;
+}
+
+.report-header .header-meta {
+    display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px;
+}
+
+.badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 12px; border-radius: var(--radius-sm);
+    font-size: 12px; font-weight: 600; line-height: 1;
+}
+
+.badge-done   { background: var(--good-soft); color: var(--good); }
+.badge-active { background: var(--accent-soft); color: var(--accent-text); }
+.badge-draft  { background: var(--surface-raised); color: var(--text-secondary); border: 1px solid var(--border); }
+.badge-plain  { background: var(--surface-raised); color: var(--text-secondary); border: 1px solid var(--border); }
+
+.header-right {
+    text-align: right; flex-shrink: 0;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+}
+
+.header-right .meta-label {
+    font-size: 11px; color: var(--text-muted); font-weight: 500;
+    letter-spacing: 0.05em; text-transform: uppercase;
+}
+
+.header-right .meta-value {
+    font-size: 13px; color: var(--text-secondary); font-weight: 500;
+}
+
+/* ========================================================================
+   Section Cards
+   ======================================================================== */
+
+.section-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 28px 32px;
     margin-bottom: 20px;
-    box-shadow: var(--shadow);
+}
+
+.section-title {
+    font-size: 13px; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 20px;
+    display: flex; align-items: center; gap: 10px;
+}
+
+.section-title::before {
+    content: "";
+    display: inline-block; width: 4px; height: 16px;
+    background: var(--accent); border-radius: 2px;
+}
+
+/* ========================================================================
+   KPI Dashboard
+   ======================================================================== */
+
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 14px;
+}
+
+@media (max-width: 1024px) {
+    .kpi-grid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 640px) {
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.kpi-card {
+    background: var(--surface);
     border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 18px;
+    display: flex; flex-direction: column; gap: 6px;
+    transition: border-color 0.15s, box-shadow 0.15s;
 }
-.section h2 {
-    font-size: 18px; font-weight: 700; margin-bottom: 14px;
-    display: flex; align-items: center; gap: 8px;
-    letter-spacing: -0.3px;
-}
-.section h2 .icon { font-size: 20px; }
 
-/* ---- Dashboard grid ---- */
-.dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 20px; }
-.stat-card {
-    background: var(--card-bg); border-radius: var(--radius);
-    padding: 20px 24px; text-align: center;
-    box-shadow: var(--shadow); border: 1px solid var(--border);
+.kpi-card:hover {
+    border-color: var(--border-strong);
+    box-shadow: 0 2px 8px rgba(15,23,42,0.04);
 }
-.stat-card .value { font-size: 32px; font-weight: 800; letter-spacing: -1px; }
-.stat-card .label { font-size: 13px; color: var(--text-secondary); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
-.stat-card.accent .value { color: var(--accent); }
-.stat-card.green .value { color: var(--green); }
-.stat-card.orange .value { color: var(--orange); }
 
-/* ---- Task summary ---- */
-.task-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
-.task-item {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 14px; background: var(--bg); border-radius: 6px;
-    font-size: 14px;
+.kpi-card .kpi-value {
+    font-size: 26px; font-weight: 800;
+    letter-spacing: -0.03em; line-height: 1.1;
 }
-.task-item .task-type { font-weight: 500; }
-.task-item .task-cnt  { font-size: 13px; color: var(--text-secondary); }
 
-/* ---- Candidate card ---- */
+.kpi-card .kpi-label {
+    font-size: 11px; font-weight: 600;
+    color: var(--text-muted); letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.kpi-card .kpi-delta {
+    font-size: 11px; font-weight: 600; margin-top: 2px;
+}
+
+.kpi-accent .kpi-value { color: var(--accent); }
+.kpi-good   .kpi-value { color: var(--good); }
+.kpi-warn   .kpi-value { color: var(--warn); }
+.kpi-caution .kpi-value { color: var(--caution); }
+
+/* ========================================================================
+   Visualization Panels
+   ======================================================================== */
+
+.viz-grid {
+    display: grid;
+    grid-template-columns: 1.3fr 1fr 1fr;
+    gap: 16px; margin-bottom: 20px;
+}
+
+@media (max-width: 1024px) {
+    .viz-grid { grid-template-columns: 1fr; }
+}
+
+.viz-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 22px 24px;
+}
+
+.viz-panel h3 {
+    font-size: 12px; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 18px;
+}
+
+/* ---- Histogram ---- */
+.histogram { display: flex; flex-direction: column; gap: 8px; }
+.hist-row {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 12px;
+}
+.hist-label {
+    width: 36px; text-align: right;
+    color: var(--text-muted); font-weight: 600;
+    font-family: "SF Mono", monospace; font-size: 11px;
+}
+.hist-track {
+    flex: 1; height: 20px; background: var(--surface-raised);
+    border-radius: var(--radius-sm); position: relative; overflow: hidden;
+}
+.hist-bar {
+    height: 100%; border-radius: var(--radius-sm);
+    transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+    position: relative;
+}
+.hist-bar::after {
+    content: attr(data-count);
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    font-size: 10px; font-weight: 700; color: #fff;
+    font-family: "SF Mono", monospace;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+.hist-bar-accent { background: var(--accent); }
+.hist-bar-good   { background: var(--good); }
+.hist-bar-warn   { background: var(--warn); }
+.hist-bar-caution{ background: var(--caution); }
+.hist-bar-empty  { background: var(--border-strong); }
+
+/* ---- Task Stacked Bars ---- */
+.task-viz { display: flex; flex-direction: column; gap: 14px; }
+.task-viz-row { display: flex; flex-direction: column; gap: 5px; }
+.task-viz-header {
+    display: flex; justify-content: space-between;
+    font-size: 12px; font-weight: 500;
+}
+.task-viz-header .task-name { color: var(--text); }
+.task-viz-header .task-count { color: var(--text-muted); font-family: "SF Mono", monospace; }
+
+.stacked-track {
+    height: 8px; background: var(--surface-raised);
+    border-radius: 99px; display: flex; overflow: hidden;
+}
+.stacked-seg {
+    height: 100%;
+    transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.stacked-done { background: var(--good); }
+.stacked-active { background: var(--accent); }
+.stacked-pending { background: var(--border-strong); }
+
+.task-legend {
+    display: flex; gap: 14px; margin-top: 10px;
+    font-size: 11px; color: var(--text-muted);
+}
+.task-legend span { display: flex; align-items: center; gap: 5px; }
+.task-legend .dot { width: 7px; height: 7px; border-radius: 50%; }
+
+/* ---- Source Performance ---- */
+.source-viz { display: flex; flex-direction: column; gap: 10px; }
+.source-row {
+    display: flex; align-items: center; gap: 10px; font-size: 12px;
+}
+.source-name {
+    width: 80px; text-align: right; font-weight: 500;
+    color: var(--text-secondary); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis;
+}
+.source-track {
+    flex: 1; height: 10px; background: var(--surface-raised);
+    border-radius: 99px; overflow: hidden;
+}
+.source-bar {
+    height: 100%; border-radius: 99px;
+    transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+    background: var(--accent);
+    opacity: 0.85;
+}
+.source-count {
+    width: 28px; text-align: right;
+    font-family: "SF Mono", monospace; font-size: 11px;
+    color: var(--text-muted); font-weight: 600;
+}
+
+/* ========================================================================
+   Strategy Block
+   ======================================================================== */
+
+.strategy-text {
+    font-size: 14px; line-height: 1.85;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+}
+
+/* ========================================================================
+   Candidate Cards
+   ======================================================================== */
+
 .candidate-card {
-    background: var(--card-bg); border-radius: var(--radius);
-    padding: 28px 32px; margin-bottom: 20px;
-    box-shadow: var(--shadow); border: 1px solid var(--border);
-    position: relative; overflow: hidden;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0;
+    margin-bottom: 16px;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: 52px 1fr 180px;
+    transition: border-color 0.15s, box-shadow 0.15s;
 }
-.candidate-card.top-pick { border-left: 4px solid var(--accent); }
+
+.candidate-card:hover {
+    border-color: var(--border-strong);
+    box-shadow: 0 4px 16px rgba(15,23,42,0.05);
+}
+
+@media (max-width: 860px) {
+    .candidate-card { grid-template-columns: 44px 1fr; }
+    .candidate-right { display: none; }
+}
+
+.candidate-rank-bar {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 800; color: var(--text-muted);
+    border-right: 1px solid var(--border);
+    background: var(--surface-raised);
+    font-family: "SF Mono", monospace;
+}
+
+.candidate-card.top-pick .candidate-rank-bar {
+    background: var(--accent); color: #fff;
+    border-right-color: var(--accent);
+}
+
+.candidate-main {
+    padding: 22px 26px;
+    display: flex; flex-direction: column; gap: 14px;
+}
+
+.candidate-right {
+    border-left: 1px solid var(--border);
+    background: var(--surface-raised);
+    padding: 22px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px;
+}
 
 .candidate-header {
     display: flex; align-items: flex-start; justify-content: space-between;
-    gap: 20px; flex-wrap: wrap;
+    gap: 16px; flex-wrap: wrap;
 }
-.candidate-header .rank {
-    font-size: 13px; font-weight: 600; color: var(--text-secondary);
-    text-transform: uppercase; letter-spacing: 0.5px;
-}
-.candidate-header h3 { font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
-.candidate-header .institution { font-size: 14px; color: var(--text-secondary); margin-top: 2px; }
-.candidate-header .position  { font-size: 13px; color: var(--accent); font-weight: 500; margin-top: 2px; }
 
-.overall-score {
-    display: flex; flex-direction: column; align-items: center;
-    min-width: 72px;
-}
-.overall-score .score-ring {
-    width: 64px; height: 64px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 22px; font-weight: 800;
-    border: 3px solid;
-}
-.overall-score .score-label { font-size: 11px; color: var(--text-secondary); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+.candidate-name-group {}
 
-/* Score ring colors */
-.score-high   { background: var(--green-bg); color: #065f46; border-color: var(--green) !important; }
-.score-mid    { background: var(--yellow-bg); color: #92400e; border-color: var(--yellow) !important; }
-.score-low    { background: var(--orange-bg); color: #9a3412; border-color: var(--orange) !important; }
-.score-poor   { background: var(--red-bg); color: #991b1b; border-color: var(--red) !important; }
-
-/* ---- Score bars ---- */
-.score-bars { margin-top: 20px; }
-.score-bar {
-    display: flex; align-items: center; gap: 12px; margin-bottom: 8px;
+.candidate-name-group h3 {
+    font-size: 18px; font-weight: 700; color: var(--text);
 }
-.score-bar .dim-label {
-    width: 120px; font-size: 13px; font-weight: 500;
-    text-align: right; flex-shrink: 0;
+
+.candidate-name-group .institution {
+    font-size: 13px; color: var(--text-secondary); margin-top: 2px;
+}
+
+.candidate-name-group .position {
+    font-size: 12px; color: var(--accent-text); font-weight: 600; margin-top: 3px;
+}
+
+.status-tag {
+    display: inline-block; padding: 2px 8px; border-radius: var(--radius-sm);
+    font-size: 11px; font-weight: 600;
+}
+
+.status-shortlisted { background: var(--good-soft); color: var(--good); }
+.status-new         { background: var(--accent-soft); color: var(--accent-text); }
+.status-contacted   { background: var(--warn-soft); color: var(--warn); }
+.status-default     { background: var(--surface-raised); color: var(--text-muted); border: 1px solid var(--border); }
+
+/* ---- Score Donut ---- */
+.donut-chart {
+    position: relative; width: 90px; height: 90px;
+}
+.donut-chart svg { transform: rotate(-90deg); }
+.donut-chart .donut-bg { fill: none; stroke: var(--border); stroke-width: 8; }
+.donut-chart .donut-fill {
+    fill: none; stroke-width: 8; stroke-linecap: round;
+    transition: stroke-dashoffset 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.donut-text {
+    position: absolute; inset: 0; display: flex;
+    flex-direction: column; align-items: center; justify-content: center;
+}
+.donut-value { font-size: 20px; font-weight: 800; line-height: 1; }
+.donut-label { font-size: 10px; color: var(--text-muted); font-weight: 600; margin-top: 2px; letter-spacing: 0.05em; }
+
+.donut-good   .donut-fill { stroke: var(--good); }
+.donut-good   .donut-value { color: var(--good); }
+.donut-warn   .donut-fill { stroke: var(--warn); }
+.donut-warn   .donut-value { color: var(--warn); }
+.donut-caution .donut-fill { stroke: var(--caution); }
+.donut-caution .donut-value { color: var(--caution); }
+.donut-bad    .donut-fill { stroke: var(--bad); }
+.donut-bad    .donut-value { color: var(--bad); }
+
+/* ---- Metrics ---- */
+.metrics-row {
+    display: flex; gap: 24px; flex-wrap: wrap;
+}
+.metric-item {
+    display: flex; align-items: baseline; gap: 6px;
+}
+.metric-item .m-val {
+    font-size: 16px; font-weight: 700;
+    font-family: "SF Mono", monospace;
+    color: var(--text);
+}
+.metric-item .m-lbl {
+    font-size: 11px; color: var(--text-muted); font-weight: 500;
+    text-transform: uppercase; letter-spacing: 0.03em;
+}
+
+/* ---- Dimension Mini-Bars ---- */
+.dim-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
+}
+
+.dim-item {
+    display: flex; flex-direction: column; gap: 5px;
+}
+
+.dim-item-header {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px;
+}
+.dim-item-header .dim-name {
+    font-weight: 600; color: var(--text-secondary);
     text-transform: capitalize;
 }
-.score-bar .bar-track {
-    flex: 1; height: 8px; background: var(--bg); border-radius: 99px;
-    position: relative; overflow: hidden;
+.dim-item-header .dim-score {
+    font-family: "SF Mono", monospace; font-weight: 700;
+    font-size: 11px;
 }
-.score-bar .bar-fill {
+
+.dim-track {
+    height: 5px; background: var(--surface-raised);
+    border-radius: 99px; overflow: hidden;
+}
+.dim-fill {
     height: 100%; border-radius: 99px;
-    transition: width 0.4s ease;
-}
-.score-bar .bar-val {
-    width: 48px; text-align: right; font-size: 13px;
-    font-weight: 700; font-variant-numeric: tabular-nums;
+    transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* Bar colors (mapped per tier) */
-.bar-high  { background: var(--green); }
-.bar-mid   { background: var(--yellow); }
-.bar-low   { background: var(--orange); }
-.bar-poor  { background: var(--red); }
+.dim-fill-good  { background: var(--good); }
+.dim-fill-warn   { background: var(--warn); }
+.dim-fill-caution   { background: var(--caution); }
+.dim-fill-bad  { background: var(--bad); }
 
-/* ---- Metrics row ---- */
-.metrics-row {
-    display: flex; gap: 20px; margin-top: 18px; flex-wrap: wrap;
+.dim-note {
+    font-size: 10px; color: var(--text-muted);
+    font-style: italic;
 }
-.metric {
-    display: flex; flex-direction: column; align-items: center;
-    padding: 10px 18px; background: var(--bg); border-radius: 8px;
-    min-width: 80px;
-}
-.metric .val { font-size: 18px; font-weight: 700; }
-.metric .lbl { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.3px; }
 
-/* ---- Evidence badge ---- */
-.evidence-badge {
+/* ---- Evidence & IDs ---- */
+.candidate-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap; margin-top: 4px;
+    padding-top: 12px; border-top: 1px solid var(--border);
+}
+
+.evidence-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: var(--radius-sm);
+    font-size: 11px; font-weight: 600;
+}
+.evidence-good   { background: var(--good-soft); color: var(--good); }
+.evidence-ok     { background: var(--warn-soft); color: var(--warn); }
+.evidence-low    { background: var(--bad-soft); color: var(--bad); }
+
+.id-pills {
+    display: flex; gap: 6px; flex-wrap: wrap;
+}
+.id-pill {
     display: inline-flex; align-items: center; gap: 4px;
-    padding: 4px 10px; border-radius: 99px; font-size: 12px;
-    font-weight: 600; margin-top: 14px;
+    padding: 2px 8px; border-radius: var(--radius-sm);
+    font-size: 10px; font-weight: 600;
+    background: var(--surface-raised); color: var(--text-muted);
+    border: 1px solid var(--border);
 }
-.evidence-good { background: var(--green-bg); color: #065f46; }
-.evidence-ok   { background: var(--yellow-bg); color: #92400e; }
-.evidence-low  { background: var(--red-bg); color: #991b1b; }
-
-/* ---- IDs row ---- */
-.ids-row {
-    display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap;
-}
-.id-tag {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 2px 10px; border-radius: 99px;
-    font-size: 11px; background: var(--accent-light);
-    color: var(--accent); font-weight: 500;
-}
-.id-tag .id-type { opacity: 0.7; }
+.id-pill .id-key { opacity: 0.7; font-weight: 500; }
 
 /* ---- Empty state ---- */
 .empty-state {
-    text-align: center; padding: 48px 24px; color: var(--text-secondary);
+    text-align: center; padding: 60px 24px; color: var(--text-muted);
 }
-.empty-state .empty-icon { font-size: 40px; margin-bottom: 12px; }
+.empty-state .empty-icon {
+    font-size: 36px; margin-bottom: 14px; opacity: 0.5;
+}
+.empty-state p { font-size: 14px; }
 
 /* ---- Footer ---- */
-.footer {
-    text-align: center; padding: 24px; color: var(--text-secondary);
-    font-size: 12px;
+.report-footer {
+    text-align: center; padding: 32px 24px;
+    color: var(--text-muted); font-size: 12px;
+    border-top: 1px solid var(--border); margin-top: 8px;
 }
 
-/* ---- Print ---- */
+/* ========================================================================
+   Print
+   ======================================================================== */
+
 @media print {
-    :root { --bg: #fff; }
-    body { font-size: 12px; }
+    body { background: #fff; font-size: 11px; }
+    body::before { display: none; }
     .container { max-width: 100%; padding: 16px; }
-    .header { background: #312e81 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .candidate-card, .section, .stat-card {
-        box-shadow: none; break-inside: avoid; border: 1px solid #ddd;
+    .section-card, .candidate-card, .viz-panel, .kpi-card {
+        box-shadow: none !important; break-inside: avoid;
+        border: 1px solid #ddd !important;
     }
-    .score-bars { break-inside: avoid; }
+    .candidate-card { grid-template-columns: 40px 1fr 160px; }
+    .candidate-right { display: flex !important; }
+    .report-header { background: #fff !important; border: 1px solid #ddd !important; }
 }
 """
 
@@ -373,97 +729,204 @@ def _render_html(report: dict[str, Any]) -> str:
     """Render a polished, self-contained HTML report."""
     r = report["run"]
     candidates = report["candidates"]
+    tasks = report["task_summary"]
 
-    # -- Header --
-    status_class = {"completed": "badge-done", "active": "badge-active"}.get(
-        r["status"], "badge-draft"
-    )
-    status_text = (r["status"] or "unknown").upper()
-
-    parts = [
-        "<!DOCTYPE html>",
-        '<html lang="en">',
-        "<head>",
-        '<meta charset="UTF-8">',
-        '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
-        f"<title>Oculai — {_esc(r['title'])}</title>",
-        f"<style>{_CSS}</style>",
-        "</head>",
-        "<body>",
-        '<div class="container">',
-        # --- Header ---
-        '<div class="header">',
-        f"<h1>{_esc(r['title'])}</h1>",
-        '<div class="meta">',
-        f"<span class='badge {status_class}'>{_esc(status_text)}</span>",
-        f"<span>&#128197; {_esc(r['created_at'])}</span>",
-        f"<span>&#127919; {_esc(r.get('target_profile') or '—')}</span>",
-        "</div>",
-        "</div>",
-    ]
-
-    # -- Dashboard --
+    # ---- Derived stats ----
     shortlisted = sum(1 for c in candidates if c["status"] == "shortlisted")
     avg_score = (
         sum(c["overall_score"] or 0 for c in candidates) / len(candidates)
         if candidates else 0
     )
+    total_evidence = sum(c.get("evidence_count", 0) for c in candidates)
+    avg_hindex = (
+        sum((c["h_index"] or 0) for c in candidates) / len(candidates)
+        if candidates else 0
+    )
+    total_tasks = sum(t["cnt"] for t in tasks)
+    completed_tasks = sum(t["cnt"] for t in tasks if t["status"] in ("completed", "done"))
+    completion_rate = (completed_tasks / total_tasks * 100) if total_tasks else 0
 
-    parts.extend([
-        '<div class="dashboard">',
-        f"<div class='stat-card accent'><div class='value'>{len(candidates)}</div><div class='label'>Candidates</div></div>",
-        f"<div class='stat-card green'><div class='value'>{shortlisted}</div><div class='label'>Shortlisted</div></div>",
-        f"<div class='stat-card accent'><div class='value'>{avg_score:.0f}</div><div class='label'>Avg Score</div></div>",
-        f"<div class='stat-card orange'><div class='value'>{sum(t['cnt'] for t in report['task_summary'])}</div><div class='label'>Tasks</div></div>",
+    # Score histogram buckets (0-20, 21-40, 41-60, 61-80, 81-100)
+    buckets = [0, 0, 0, 0, 0]
+    bucket_labels = ["0-20", "21-40", "41-60", "61-80", "81-100"]
+    bucket_classes = ["hist-bar-poor", "hist-bar-caution", "hist-bar-warn", "hist-bar-good", "hist-bar-accent"]
+    for c in candidates:
+        s = c["overall_score"] or 0
+        if s >= 81:
+            buckets[4] += 1
+        elif s >= 61:
+            buckets[3] += 1
+        elif s >= 41:
+            buckets[2] += 1
+        elif s >= 21:
+            buckets[1] += 1
+        else:
+            buckets[0] += 1
+    max_bucket = max(buckets) if any(buckets) else 1
+
+    # Task grouped by type
+    task_by_type: dict[str, dict[str, int]] = {}
+    for t in tasks:
+        tt = t["task_type"]
+        if tt not in task_by_type:
+            task_by_type[tt] = {}
+        task_by_type[tt][t["status"]] = t["cnt"]
+
+    # Source performance (task type as proxy)
+    source_data = sorted(
+        [(tt, sum(s.values())) for tt, s in task_by_type.items()],
+        key=lambda x: x[1], reverse=True,
+    )[:6]
+    max_source = max((v for _, v in source_data), default=1)
+
+    status_map = {
+        "completed": ("badge-done", "已完成"),
+        "active": ("badge-active", "进行中"),
+        "done": ("badge-done", "已完成"),
+    }
+    status_class, status_label = status_map.get(r["status"], ("badge-draft", r["status"] or "未知"))
+
+    parts = [
+        "<!DOCTYPE html>",
+        '<html lang="zh-CN">',
+        "<head>",
+        '<meta charset="UTF-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
+        f"<title>Oculai 人才洞察报告 — {_esc(r['title'])}</title>",
+        f"<style>{_CSS}</style>",
+        "</head>",
+        "<body>",
+        '<div class="container">',
+        # ========== HEADER ==========
+        '<div class="report-header">',
+        "<div>",
+        '<div class="brand">Oculai 智能人才洞察</div>',
+        f"<h1>{_esc(r['title'])}</h1>",
+        '<div class="header-meta">',
+        f"<span class='badge {status_class}'>{_esc(status_label)}</span>",
+        f"<span class='badge badge-plain'>{_esc(r['created_at'])}</span>",
+        f"<span class='badge badge-plain'>{_esc(r.get('target_profile') or '未指定目标画像')}</span>",
         "</div>",
+        "</div>",
+        '<div class="header-right">',
+        '<div class="meta-label">报告编号</div>',
+        f'<div class="meta-value mono">{str(r["run_id"])[:8].upper()}</div>',
+        '<div class="meta-label" style="margin-top:8px">生成时间</div>',
+        f'<div class="meta-value">{r["created_at"][:19]}</div>',
+        "</div>",
+        "</div>",
+        # ========== KPI DASHBOARD ==========
+        '<div class="kpi-grid">',
+        f'<div class="kpi-card kpi-accent"><div class="kpi-value mono">{len(candidates)}</div><div class="kpi-label">候选人总数</div></div>',
+        f'<div class="kpi-card kpi-good"><div class="kpi-value mono">{shortlisted}</div><div class="kpi-label">已入围</div></div>',
+        f'<div class="kpi-card kpi-accent"><div class="kpi-value mono">{avg_score:.0f}</div><div class="kpi-label">平均综合评分</div></div>',
+        f'<div class="kpi-card"><div class="kpi-value mono">{total_evidence}</div><div class="kpi-label">证据条目总数</div></div>',
+        f'<div class="kpi-card"><div class="kpi-value mono">{avg_hindex:.0f}</div><div class="kpi-label">平均 H-Index</div></div>',
+        f'<div class="kpi-card kpi-good"><div class="kpi-value mono">{completion_rate:.0f}%</div><div class="kpi-label">任务完成率</div></div>',
+        "</div>",
+        # ========== VISUALIZATIONS ==========
+        '<div class="viz-grid">',
+        # -- Score Histogram --
+        '<div class="viz-panel">',
+        '<h3>综合评分分布</h3>',
+        '<div class="histogram">',
+    ]
+    for label, count, bclass in zip(bucket_labels, buckets, bucket_classes):
+        width = (count / max_bucket * 100) if max_bucket else 0
+        parts.append(
+            '<div class="hist-row">'
+            f'<div class="hist-label">{label}</div>'
+            f'<div class="hist-track">'
+            f'<div class="hist-bar {bclass}" style="width:{width:.0f}%" data-count="{count}"></div>'
+            '</div>'
+            '</div>'
+        )
+    parts.append('</div></div>')
+
+    # -- Task Execution --
+    parts.extend([
+        '<div class="viz-panel">',
+        '<h3>任务执行状态</h3>',
+        '<div class="task-viz">',
+    ])
+    for tt, statuses in sorted(task_by_type.items(), key=lambda x: sum(x[1].values()), reverse=True)[:5]:
+        total = sum(statuses.values())
+        done = statuses.get("completed", 0) + statuses.get("done", 0)
+        active = statuses.get("active", 0)
+        pending = total - done - active
+        parts.append(
+            '<div class="task-viz-row">'
+            '<div class="task-viz-header">'
+            f'<span class="task-name">{_esc(tt)}</span>'
+            f'<span class="task-count">{done}/{total}</span>'
+            '</div>'
+            '<div class="stacked-track">'
+            f'<div class="stacked-seg stacked-done" style="width:{done/total*100:.0f}%"></div>'
+            f'<div class="stacked-seg stacked-active" style="width:{active/total*100:.0f}%"></div>'
+            f'<div class="stacked-seg stacked-pending" style="width:{pending/total*100:.0f}%"></div>'
+            '</div>'
+            '</div>'
+        )
+    parts.extend([
+        '<div class="task-legend">',
+        '<span><span class="dot" style="background:var(--good)"></span>已完成</span>',
+        '<span><span class="dot" style="background:var(--accent)"></span>进行中</span>',
+        '<span><span class="dot" style="background:var(--border-strong)"></span>待处理</span>',
+        '</div></div></div>',
     ])
 
-    # -- Strategy --
-    strategy = report["plan"].get("strategy_summary") or "No strategy recorded."
+    # -- Source Performance --
     parts.extend([
-        '<div class="section">',
-        '<h2><span class="icon">&#128161;</span> Strategy</h2>',
-        f"<p style='font-size:14px;line-height:1.7;'>{_esc(strategy)}</p>",
-        "</div>",
+        '<div class="viz-panel">',
+        '<h3>数据来源效能</h3>',
+        '<div class="source-viz">',
+    ])
+    for src, count in source_data:
+        width = (count / max_source * 100) if max_source else 0
+        parts.append(
+            '<div class="source-row">'
+            f'<div class="source-name">{_esc(src)}</div>'
+            '<div class="source-track">'
+            f'<div class="source-bar" style="width:{width:.0f}%"></div>'
+            '</div>'
+            f'<div class="source-count">{count}</div>'
+            '</div>'
+        )
+    parts.append('</div></div>')
+    parts.append('</div>')  # close viz-grid
+
+    # ========== STRATEGY ==========
+    strategy = report["plan"].get("strategy_summary") or "未记录搜索策略。"
+    parts.extend([
+        '<div class="section-card">',
+        '<div class="section-title">搜索策略</div>',
+        f'<div class="strategy-text">{_esc(strategy)}</div>',
+        '</div>',
     ])
 
-    # -- Task Summary --
-    if report["task_summary"]:
-        parts.append('<div class="section">')
-        parts.append('<h2><span class="icon">&#128203;</span> Task Summary</h2>')
-        parts.append('<div class="task-grid">')
-        for t in report["task_summary"]:
-            parts.append(
-                '<div class="task-item">'
-                f"<span class='task-type'>{_esc(t['task_type'])}</span>"
-                f"<span class='task-cnt'>{t['cnt']} &#183; {_esc(t['status'])}</span>"
-                "</div>"
-            )
-        parts.append("</div></div>")
-
-    # -- Candidates --
-    parts.append('<div class="section">')
-    parts.append(f'<h2><span class="icon">&#128100;</span> Candidates ({len(candidates)})</h2>')
-
+    # ========== CANDIDATES ==========
+    parts.extend([
+        '<div class="section-card">',
+        f'<div class="section-title">候选人评估详情（共 {len(candidates)} 位）</div>',
+    ])
     if not candidates:
         parts.append(
             '<div class="empty-state">'
             '<div class="empty-icon">&#128269;</div>'
-            "<p>No candidates found in this run.</p>"
+            "<p>本次运行暂未发现候选人。</p>"
             "</div>"
         )
     else:
         for idx, c in enumerate(candidates, 1):
             parts.append(_candidate_card(idx, c))
+    parts.append("</div>")
 
-    parts.append("</div>")  # close section
-
-    # -- Footer --
+    # ========== FOOTER ==========
     parts.extend([
-        '<div class="footer">',
-        f"Generated by Oculai Agent-Native Talent Sourcing &middot; {_esc(r['created_at'])}",
-        "</div>",
-        "</div>",  # close container
+        '<div class="report-footer">',
+        '由 Oculai 多Agent智能人才 sourcing 系统生成 &middot; 仅供内部招聘参考',
+        '</div>',
+        "</div>",  # container
         "</body>",
         "</html>",
     ])
@@ -471,23 +934,55 @@ def _render_html(report: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+_DIM_LABELS = {
+    "academic": "学术能力",
+    "engineering": "工程能力",
+    "leadership": "领导力",
+    "communication": "沟通能力",
+    "culture_fit": "文化匹配",
+    "skill_match": "技能匹配",
+    "location": "地点匹配",
+    "career_stage": "职业阶段",
+    "mobility": "流动意愿",
+    "overall": "综合评分",
+}
+
+
+_STATUS_LABELS = {
+    "shortlisted": ("已入围", "status-shortlisted"),
+    "new": ("新增", "status-new"),
+    "contacted": ("已联系", "status-contacted"),
+}
+
+
 def _candidate_card(idx: int, c: dict[str, Any]) -> str:
-    """Render a single candidate card."""
+    """Render a single candidate card with donut chart and dim mini-bars."""
     score = c["overall_score"] or 0
-    score_tier, _ = _score_tier(score)
+    score_tier, dim_tier = _score_tier(score)
     rank_str = f"#{idx}"
     top_class = " top-pick" if idx <= 3 else ""
 
+    # Donut chart: circumference for r=40 is ~251.327
+    circumference = 251.327
+    dash_offset = circumference * (1 - min(score, 100) / 100)
+
+    status_label, status_class = _STATUS_LABELS.get(
+        c["status"], ("评估中", "status-default")
+    )
+
     lines = [
         f'<div class="candidate-card{top_class}">',
+        # -- Rank bar --
+        f'<div class="candidate-rank-bar">{rank_str}</div>',
+        # -- Main content --
+        '<div class="candidate-main">',
         '<div class="candidate-header">',
-        "<div>",
-        f"<div class='rank'>{rank_str}</div>",
-        f"<h3>{_esc(c['name'] or 'Unknown')}</h3>",
+        '<div class="candidate-name-group">',
+        f"<h3>{_esc(c['name'] or '未知')}</h3>",
         f"<div class='institution'>{_esc(c['institution'] or '—')}</div>",
         f"<div class='position'>{_esc(c['position'] or '')}</div>" if c.get("position") else "",
         "</div>",
-        f"<div class='overall-score'><div class='score-ring {score_tier}'>{score:.0f}</div><div class='score-label'>Overall</div></div>",
+        f"<span class='status-tag {status_class}'>{status_label}</span>",
         "</div>",
     ]
 
@@ -498,27 +993,16 @@ def _candidate_card(idx: int, c: dict[str, Any]) -> str:
     evidence = c.get("evidence_count", 0)
 
     lines.append('<div class="metrics-row">')
-    lines.append(f"<div class='metric'><span class='val'>{_fmt_num(h)}</span><span class='lbl'>h-index</span></div>")
-    lines.append(f"<div class='metric'><span class='val'>{_fmt_num(citations)}</span><span class='lbl'>Citations</span></div>")
-    lines.append(f"<div class='metric'><span class='val'>{_fmt_num(papers)}</span><span class='lbl'>Papers</span></div>")
+    lines.append(f'<div class="metric-item"><span class="m-val">{_fmt_num(h)}</span><span class="m-lbl">H-Index</span></div>')
+    lines.append(f'<div class="metric-item"><span class="m-val">{_fmt_num(citations)}</span><span class="m-lbl">被引次数</span></div>')
+    lines.append(f'<div class="metric-item"><span class="m-val">{_fmt_num(papers)}</span><span class="m-lbl">论文数</span></div>')
+    lines.append(f'<div class="metric-item"><span class="m-val">{evidence}</span><span class="m-lbl">证据条</span></div>')
     lines.append("</div>")
 
-    # -- Evidence badge --
-    if evidence >= 10:
-        ev_class = "evidence-good"
-    elif evidence >= 5:
-        ev_class = "evidence-ok"
-    else:
-        ev_class = "evidence-low"
-    lines.append(
-        f"<div class='evidence-badge {ev_class}'>&#128274; {evidence} evidence items</div>"
-    )
-
-    # -- Dimension scores --
+    # -- Dimension mini-bars --
     dims = c.get("dimension_scores") or {}
     if dims:
-        lines.append('<div class="score-bars" style="margin-top:16px;">')
-        # Sort: overall last, rest alphabetically
+        lines.append('<div class="dim-grid">')
         sorted_dims = sorted(
             dims.items(),
             key=lambda x: (0 if x[0] == "overall" else 1, x[0]),
@@ -526,19 +1010,34 @@ def _candidate_card(idx: int, c: dict[str, Any]) -> str:
         for dim, s in sorted_dims:
             sc = s["score"] or 0
             conf = s.get("confidence", 0.0)
-            _, bar_class = _score_tier(sc)
-            # Show confidence in the label when below 0.6
-            conf_note = f" &#183; {conf:.0%}" if conf < 0.6 else ""
+            _, fill_tier = _score_tier(sc)
+            dim_name = _DIM_LABELS.get(dim, dim)
+            dim_fill_class = f"dim-fill-{fill_tier.replace('bar-', '')}"
+            conf_note = f"（置信度 {conf:.0%}）" if conf < 0.6 else ""
             lines.append(
-                '<div class="score-bar">'
-                f"<span class='dim-label' title='confidence: {conf:.0%}'>{_esc(dim)}{conf_note}</span>"
-                f"<div class='bar-track'><div class='bar-fill {bar_class}' style='width:{sc * 10:.0f}%'></div></div>"
-                f"<span class='bar-val'>{sc:.1f}</span>"
-                "</div>"
+                '<div class="dim-item">'
+                '<div class="dim-item-header">'
+                f'<span class="dim-name">{_esc(dim_name)}{conf_note}</span>'
+                f'<span class="dim-score" style="color:var(--{fill_tier.replace('bar-', '')})">{sc:.1f}</span>'
+                '</div>'
+                '<div class="dim-track">'
+                f'<div class="dim-fill {dim_fill_class}" style="width:{min(sc*10,100):.0f}%"></div>'
+                '</div>'
+                '</div>'
             )
         lines.append("</div>")
 
-    # -- External IDs --
+    # -- Footer: evidence pill + IDs --
+    if evidence >= 10:
+        ev_class = "evidence-good"
+    elif evidence >= 5:
+        ev_class = "evidence-ok"
+    else:
+        ev_class = "evidence-low"
+
+    lines.append('<div class="candidate-footer">')
+    lines.append(f'<span class="evidence-pill {ev_class}">{evidence} 条证据</span>')
+
     ext = c.get("external_ids") or {}
     active_ids = [
         ("ORCID", ext.get("orcid")),
@@ -548,12 +1047,32 @@ def _candidate_card(idx: int, c: dict[str, Any]) -> str:
     ]
     active_ids = [(k, v) for k, v in active_ids if v]
     if active_ids:
-        lines.append('<div class="ids-row">')
+        lines.append('<div class="id-pills">')
         for id_type, id_val in active_ids:
             lines.append(
-                f"<span class='id-tag'><span class='id-type'>{id_type}</span> {_esc(id_val)}</span>"
+                f'<span class="id-pill"><span class="id-key">{id_type}</span> {_esc(id_val)}</span>'
             )
         lines.append("</div>")
+
+    lines.append("</div>")  # close candidate-footer
+    lines.append("</div>")  # close candidate-main
+
+    # -- Right: Donut chart --
+    lines.append(f'<div class="candidate-right">')
+    lines.append(f'<div class="donut-chart donut-{score_tier.replace('score-', '')}">')
+    lines.append('<svg viewBox="0 0 100 100" width="90" height="90">')
+    lines.append('<circle class="donut-bg" cx="50" cy="50" r="40"/>')
+    lines.append(
+        f'<circle class="donut-fill" cx="50" cy="50" r="40" '
+        f'stroke-dasharray="{circumference}" stroke-dashoffset="{dash_offset:.1f}"/>'
+    )
+    lines.append('</svg>')
+    lines.append('<div class="donut-text">')
+    lines.append(f'<div class="donut-value">{score:.0f}</div>')
+    lines.append('<div class="donut-label">综合评分</div>')
+    lines.append('</div>')
+    lines.append('</div>')
+    lines.append('</div>')  # close candidate-right
 
     lines.append("</div>")  # close candidate-card
     return "\n".join(lines)
@@ -566,13 +1085,13 @@ def _candidate_card(idx: int, c: dict[str, Any]) -> str:
 def _score_tier(score: float) -> tuple[str, str]:
     """Return (ring_class, bar_class) for a 0-100 overall or 0-10 dimension."""
     if score >= 80:
-        return ("score-high", "bar-high")
+        return ("score-good", "bar-good")
     elif score >= 50:
-        return ("score-mid", "bar-mid")
+        return ("score-warn", "bar-warn")
     elif score >= 30:
-        return ("score-low", "bar-low")
+        return ("score-caution", "bar-caution")
     else:
-        return ("score-poor", "bar-poor")
+        return ("score-bad", "bar-bad")
 
 
 def _esc(s: str) -> str:

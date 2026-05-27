@@ -1,1 +1,1 @@
-"""Oculai MCP Server — Agent-Native Talent Sourcing Tool Layer."""
+"""Oculai MCP Server — Multi-Agent Talent Sourcing Tool Layer."""

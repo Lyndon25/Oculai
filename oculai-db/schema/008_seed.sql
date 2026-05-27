@@ -1,5 +1,5 @@
 -- 008_seed.sql
--- Test seed data for Oculai Agent-Native development.
+-- Test seed data for Oculai multi-Agent development.
 
 -- ============================================================
 -- Seed Persons

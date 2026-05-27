@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Oculai is an **Agent-Native multi-agent talent sourcing system**. Claude Code is the sole orchestrator/decision-maker. PostgreSQL is the global async state pool. The Python/MCP layer exposes only deterministic functions — **no LLM calls, no autonomous decisions**.
+Oculai is a **multi-Agent collaborative talent sourcing system** for **Chinese company HRs**. Claude Code is the sole orchestrator/decision-maker. PostgreSQL is the global async state pool. The Python/MCP layer exposes only deterministic functions — **no LLM calls, no autonomous decisions**.
 
-Target environment: Chinese candidates + global evidence, Baidu as important component, aggressive/forward-looking tech stack.
+**Core constraint: Only search for Chinese/China-based candidates.** All sources, queries, and evidence gathering must target Chinese talent. See `oculai/skills/oculai-talent-sourcing/SKILL.md` for the China-First Mandate.
 
 ## Architecture Principle
 
@@ -71,9 +71,12 @@ print('OK')
 ## Environment
 
 - `.env` file at `oculai-mcp/.env` — read by `pydantic-settings` (mtime-aware cache reload)
+- `.env.example` at `oculai-mcp/.env.example` — documents all available keys with signup URLs
 - DB credentials default: `oculai` / `oculai_dev` on `localhost:5432`
 - PostgreSQL config at `oculai-db/postgresql.conf` — must include `listen_addresses = '*'` for Docker Desktop on Windows
 - Container healthcheck via `pg_isready` every 10s
+- API keys in `config.py` Settings class: `github_token`, `semantic_scholar_api_key` (alias: `s2_api_key`), `openalex_email`, `baidu_api_key`, `tavily_api_key`, `exa_api_key`
+- `BAIDU_API_KEY` uses the Qianfan AppBuilder Bearer token format (`bce-v3/ALTAK-xxx/xxx`) and powers both `baidu_qianfan` and `baidu_scholar` sources
 
 ## Key Implementation Details
 
@@ -89,13 +92,34 @@ To add a new tool:
 
 ### Source connectors
 Sources follow the `IDataSource` ABC (`sources/base.py`):
-- `get_tool_schema()` — JSON Schema for the search parameters
-- `get_capabilities()` — What this source can do
-- `search(SearchQuery)` → `list[RawCandidate]`
+- `search(SearchQuery)` → `list[RawCandidate]` — keyword search (required)
+- `get_detail(external_id)` → `RawCandidate | None` — profile lookup (required)
+- `check_health()` → `HealthStatus` — endpoint health (required)
+- `get_capabilities()` → `dict` — metadata descriptor (implemented on base)
+- `auth_required: bool` — set `True` if the source reads an API key
+- `supported_operations: list[str]` — `["search"]` or `["search", "get_detail"]`
 
 Sources auto-register in `sources/registry.py` on import. Adding a new source requires:
 1. Implement `IDataSource` in a new `sources/*.py` file
 2. Import and `register_source()` in `registry.py`
+3. If it needs an API key, add a field to `config.py` Settings class
+
+**Source availability quick reference:**
+
+| Source | Key Required | Notes |
+|---|---|---|
+| arxiv, dblp, openalex, conference | None | Always available |
+| github | `GITHUB_TOKEN` | 60 req/h without, 5000 req/h with |
+| semantic_scholar | `SEMANTIC_SCHOLAR_API_KEY` | Optional, increases rate limit |
+| baidu_qianfan | `BAIDU_API_KEY` | Official Qianfan AI Search API, 100 calls/day free |
+| baidu_scholar | `BAIDU_API_KEY` | Qianfan Scholar Search API (beta endpoint, may 404) |
+| baidu | None | Unofficial `baidusearch` PyPI scraper (`pip install baidusearch`) |
+| industry | `GITHUB_TOKEN` | Wraps GitHub for industry-focused search |
+| personal_homepage | None | HTML scraping, limited to domain-mapped universities |
+| juejin (掘金) | None | Public API (api.juejin.cn), user search + profile, Chinese dev community |
+| zhihu (知乎) | None | Public API (zhihu.com/api/v4), people search + profile, may need browser UA |
+| csdn (中国开发者网络) | None | Search API + profile HTML scraping, technical blog platform |
+| web_search (tool) | `TAVILY_API_KEY` or `EXA_API_KEY` | Not a source; MCP tool in `tools/web_search.py` |
 
 ### Database migrations
 Schema is managed via numbered SQL files in `oculai-db/schema/` that run on container init (`docker-entrypoint-initdb.d`). Files execute in alphabetical order:
@@ -219,5 +243,6 @@ Before starting a test run:
 | `oculai-mcp/src/oculai_mcp/` | Python MCP server source |
 | `oculai-mcp/src/oculai_mcp/db/` | Database access layer (asyncpg, CRUD, retry logic) |
 | `oculai-mcp/src/oculai_mcp/tools/` | Domain tool implementations (candidates, evidence, assessment, etc.) |
-| `oculai-mcp/src/oculai_mcp/sources/` | Source connectors (arXiv, DBLP, GitHub, Semantic Scholar, OpenAlex, Baidu, etc.) |
+| `oculai-mcp/src/oculai_mcp/sources/` | Source connectors (arXiv, DBLP, GitHub, Semantic Scholar, OpenAlex, Baidu scrapers, Baidu Qianfan, homepage, Juejin, Zhihu, CSDN) |
+| `oculai-mcp/src/oculai_mcp/tools/web_search.py` | Tavily/Exa web search MCP tool (separate from source connectors) |
 | `oculai-mcp/tests/` | Integration tests |

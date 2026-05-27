@@ -1,5 +1,5 @@
 -- 004_indexes.sql
--- Performance-critical indexes for Oculai Agent-Native.
+-- Performance-critical indexes for Oculai multi-Agent system.
 -- Phase-era indexes on JobRecord and CandidateQueue removed.
 -- New Task-focused indexes added.
 

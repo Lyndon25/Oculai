@@ -1,4 +1,4 @@
-"""Oculai MCP Server — Agent-Native Talent Sourcing Tools.
+"""Oculai MCP Server — Multi-Agent Talent Sourcing Tools.
 
 Exposes deterministic domain tools for Claude Code main Agent.
 No LLM calls. No autonomous decisions. Just execution.
@@ -15,7 +15,6 @@ from oculai_mcp.tools import web_search, outreach, browser
 
 mcp = FastMCP(
     "Oculai Talent Sourcing",
-    description="Agent-Native multi-agent talent sourcing system tools",
 )
 
 
