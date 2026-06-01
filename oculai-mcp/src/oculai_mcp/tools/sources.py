@@ -23,6 +23,9 @@ async def search_source(
     offset: int = 0,
 ) -> dict[str, Any]:
     """Search a specific data source and return structured candidates."""
+    if isinstance(keywords, str):
+        keywords = [keywords]
+
     source = create_source(source_name)
     if source is None:
         return {"status": "error", "error": {"code": "unknown_source", "message": f"Source '{source_name}' not found"}}

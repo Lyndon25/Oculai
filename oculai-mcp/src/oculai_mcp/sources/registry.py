@@ -7,6 +7,7 @@ Sources can also be registered manually via register_source().
 import logging
 from typing import Type
 
+from oculai_mcp.config import get_settings
 from oculai_mcp.sources.base import IDataSource
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,8 @@ def get_all_capabilities() -> list[dict]:
 
 def _register_api_sources() -> None:
     try:
+        settings = get_settings()
+
         from oculai_mcp.sources.arxiv_api import ArxivAPISource
         from oculai_mcp.sources.dblp_api import DblpAPISource
         from oculai_mcp.sources.github_api import GitHubAPISource
@@ -65,33 +68,44 @@ def _register_api_sources() -> None:
         from oculai_mcp.sources.pmlr import PMLRSource
         from oculai_mcp.sources.conference import ConferenceSource
         from oculai_mcp.sources.baidu import BaiduScholarSource, BaiduSearchSource
-        from oculai_mcp.sources.baidu_qianfan import BaiduQianfanSource
         from oculai_mcp.sources.homepage import PersonalHomepageSource
         from oculai_mcp.sources.juejin import JuejinSource
         from oculai_mcp.sources.zhihu import ZhihuSource
         from oculai_mcp.sources.csdn import CSDNSource
 
-        register_source("arxiv", ArxivAPISource)
-        register_source("dblp", DblpAPISource)
-        register_source("github", GitHubAPISource)
-        register_source("semantic_scholar", SemanticScholarAPISource)
-        register_source("openalex", OpenAlexAPISource)
-        register_source("industry", IndustrySource)
-        register_source("acl_anthology", ACLAnthologySource)
-        register_source("pmlr", PMLRSource)
-        register_source("conference", ConferenceSource)
-        register_source("baidu_scholar", BaiduScholarSource)
-        register_source("baidu", BaiduSearchSource)
-        register_source("baidu_qianfan", BaiduQianfanSource)
-        register_source("personal_homepage", PersonalHomepageSource)
-        register_source("juejin", JuejinSource)
-        register_source("zhihu", ZhihuSource)
-        register_source("csdn", CSDNSource)
-        logger.info(
-            "Registered sources: arxiv, dblp, github, semantic_scholar, openalex, "
-            "industry, acl_anthology, pmlr, conference, baidu_scholar, baidu, "
-            "baidu_qianfan, personal_homepage, juejin, zhihu, csdn"
-        )
+        registered = []
+        if settings.source_enable_arxiv:
+            register_source("arxiv", ArxivAPISource); registered.append("arxiv")
+        if settings.source_enable_dblp:
+            register_source("dblp", DblpAPISource); registered.append("dblp")
+        if settings.source_enable_github:
+            register_source("github", GitHubAPISource); registered.append("github")
+        if settings.source_enable_semantic_scholar:
+            register_source("semantic_scholar", SemanticScholarAPISource); registered.append("semantic_scholar")
+        if settings.source_enable_openalex:
+            register_source("openalex", OpenAlexAPISource); registered.append("openalex")
+        if settings.source_enable_industry:
+            register_source("industry", IndustrySource); registered.append("industry")
+        if settings.source_enable_acl_anthology:
+            register_source("acl_anthology", ACLAnthologySource); registered.append("acl_anthology")
+        if settings.source_enable_pmlr:
+            register_source("pmlr", PMLRSource); registered.append("pmlr")
+        if settings.source_enable_conference:
+            register_source("conference", ConferenceSource); registered.append("conference")
+        if settings.source_enable_baidu_scholar:
+            register_source("baidu_scholar", BaiduScholarSource); registered.append("baidu_scholar")
+        if settings.source_enable_baidu:
+            register_source("baidu", BaiduSearchSource); registered.append("baidu")
+        if settings.source_enable_personal_homepage:
+            register_source("personal_homepage", PersonalHomepageSource); registered.append("personal_homepage")
+        if settings.source_enable_juejin:
+            register_source("juejin", JuejinSource); registered.append("juejin")
+        if settings.source_enable_zhihu:
+            register_source("zhihu", ZhihuSource); registered.append("zhihu")
+        if settings.source_enable_csdn:
+            register_source("csdn", CSDNSource); registered.append("csdn")
+
+        logger.info("Registered sources: %s", ", ".join(registered))
     except ImportError as e:
         logger.warning("Some sources unavailable: %s", e)
 

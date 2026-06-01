@@ -128,6 +128,13 @@ class JuejinSource(IDataSource):
 
                 short_intro = f"{job_title} @ {company}" if job_title and company else (job_title or company or "")
 
+                # Handle-like name check
+                _is_handle = False
+                if user_name:
+                    alpha = [c for c in user_name if c.isalpha()]
+                    if (len(user_name) < 4 and alpha and all(c.islower() for c in alpha)) or user_name.startswith("@") or user_name.isdigit():
+                        _is_handle = True
+
                 candidates.append(
                     RawCandidate(
                         name=user_name,
@@ -147,9 +154,9 @@ class JuejinSource(IDataSource):
                             "digg_count": user_info.get("got_digg_count", 0) or user_info.get("digg_count", 0),
                             "article_title": result_model.get("article_info", {}).get("title", ""),
                         },
-                        result_type="profile_page",
-                        confidence="medium",
-                        extraction_method="direct",
+                        result_type="web_page" if _is_handle else "profile_page",
+                        confidence="low" if _is_handle else "medium",
+                        extraction_method="unverified" if _is_handle else "direct",
                     )
                 )
 

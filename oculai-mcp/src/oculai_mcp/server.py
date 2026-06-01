@@ -673,6 +673,7 @@ async def oculai_get_evidence(
     person_id: str,
     evidence_type: str | None = None,
     limit: int = 100,
+    min_tier: int | None = None,
 ) -> dict[str, Any]:
     """Get all evidence for a candidate, optionally filtered by type.
 
@@ -682,12 +683,14 @@ async def oculai_get_evidence(
         person_id: Internal Person UUID
         evidence_type: Optional filter (publication, code_repo, award, etc.)
         limit: Max results (default 100)
+        min_tier: Minimum evidence tier to include (1-4, optional)
     """
     from uuid import UUID
     return await evidence.get_evidence(
         person_id=UUID(person_id),
         evidence_type=evidence_type,
         limit=limit,
+        min_tier=min_tier,
     )
 
 

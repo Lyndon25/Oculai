@@ -24,7 +24,6 @@ _DEFAULT_CONFIG = {
     "max_duration_minutes": 30,
     "max_total_calls": 200,
     "source_call_budget": {
-        "baidu_qianfan": 50,
         "github": 40,
         "openalex": 30,
         "arxiv": 30,
@@ -50,7 +49,6 @@ _DEFAULT_CONFIG = {
 
 # China-first source weights for initial budget allocation
 _SOURCE_PRIORITY_WEIGHTS = {
-    "baidu_qianfan": 1.5,
     "baidu_scholar": 1.4,
     "zhihu": 1.4,
     "juejin": 1.3,

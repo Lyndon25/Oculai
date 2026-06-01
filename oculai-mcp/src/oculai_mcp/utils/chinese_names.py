@@ -263,3 +263,46 @@ def build_search_probe(
         "institution_aliases": inst_aliases,
         "cross_combinations": list(dict.fromkeys(cross_combinations))[:20],
     }
+
+
+# Generic China-affiliation keywords beyond the institution aliases above
+_CHINA_KEYWORDS: list[str] = [
+    "china", "chinese", "beijing", "shanghai", "shenzhen", "hangzhou",
+    "guangzhou", "chengdu", "wuhan", "nanjing", "xian", "xi'an",
+    "tsinghua", "peking", "zhejiang", "fudan", "sjtu", "ustc",
+    "cas", "buaa", "hit", "xidian", "hust", "bit", "nju", "tongji",
+    "ruc", "sysu", "sustech", "cuhk", "hkust", "cityu", "polyu",
+    "bytedance", "alibaba", "tencent", "baidu", "huawei", "meituan",
+    "xiaohongshu", "jd.com", "didi", "netease", "xiaomi", "oppo", "vivo",
+    "中国", "北京", "上海", "深圳", "杭州", "广州", "成都", "武汉", "南京",
+    "清华", "北大", "中科院", "中科大", "浙大", "复旦", "上交", "北航",
+    "哈工大", "西电", "华科", "北理工", "南大", "同济", "人大", "中大",
+    "字节", "阿里", "腾讯", "百度", "华为", "美团", "小米", "京东",
+]
+
+
+def has_china_affiliation(institution: str | None, name: str | None) -> bool:
+    """Return True if the candidate shows signals of China affiliation.
+
+    Checks:
+    1. Institution contains known Chinese university/company/location keywords
+    2. Name contains CJK (Chinese) characters
+    """
+    if name:
+        # CJK Unified Ideographs range
+        if any("一" <= ch <= "鿿" for ch in name):
+            return True
+
+    if institution:
+        inst_lower = institution.lower()
+        # Check against institution aliases (covers the full alias list)
+        for aliases in INSTITUTION_ALIASES.values():
+            for alias in aliases:
+                if alias.lower() in inst_lower:
+                    return True
+        # Check generic China keywords
+        for kw in _CHINA_KEYWORDS:
+            if kw in inst_lower:
+                return True
+
+    return False

@@ -11,6 +11,7 @@ import httpx
 from oculai_mcp.db.provenance import log_source_call
 from oculai_mcp.db.quotas import check_quota, consume_quota
 from oculai_mcp.sources.base import HealthStatus, IDataSource, RawCandidate, SearchQuery
+from oculai_mcp.utils.chinese_names import has_china_affiliation
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,13 @@ class DblpAPISource(IDataSource):
                 error_message=str(e),
             )
             logger.exception("DBLP API search failed")
+
+        # --- China-First soft sorting ---
+        if (query.extra or {}).get("china_first", True):
+            china = [c for c in candidates if has_china_affiliation(c.institution, c.name)]
+            non_china = [c for c in candidates if c not in china]
+            candidates = china + non_china
+            candidates = candidates[:query.limit]
 
         return candidates
 

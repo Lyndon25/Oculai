@@ -169,6 +169,13 @@ class CSDNSource(IDataSource):
                 )
                 article_url = item.get("url", "") or item.get("article_url", "") or ""
 
+                # Handle-like name check
+                _is_handle = False
+                if name:
+                    alpha = [c for c in name if c.isalpha()]
+                    if (len(name) < 4 and alpha and all(c.islower() for c in alpha)) or name.startswith("@") or name.isdigit():
+                        _is_handle = True
+
                 raw_metadata: dict[str, Any] = {
                     "source": "csdn",
                     "username": username,
@@ -186,9 +193,9 @@ class CSDNSource(IDataSource):
                         institution=institution,
                         profile_url=f"{CSDN_BLOG_URL}/{username}",
                         raw_metadata=raw_metadata,
-                        result_type="profile_page",
-                        confidence="medium",
-                        extraction_method=extraction_method,
+                        result_type="web_page" if _is_handle else "profile_page",
+                        confidence="low" if _is_handle else "medium",
+                        extraction_method="unverified" if _is_handle else extraction_method,
                     )
                 )
 

@@ -41,6 +41,26 @@ class Settings(BaseSettings):
         """Alias for semantic_scholar_api_key used by Semantic Scholar source."""
         return self.semantic_scholar_api_key
 
+    # China-First mandate toggle
+    china_first_enabled: bool = True
+
+    # Source enable/disable toggles
+    source_enable_arxiv: bool = True
+    source_enable_dblp: bool = True
+    source_enable_github: bool = True
+    source_enable_semantic_scholar: bool = True
+    source_enable_openalex: bool = True
+    source_enable_industry: bool = True
+    source_enable_acl_anthology: bool = True
+    source_enable_pmlr: bool = True
+    source_enable_conference: bool = True
+    source_enable_baidu_scholar: bool = True
+    source_enable_baidu: bool = True
+    source_enable_personal_homepage: bool = True
+    source_enable_juejin: bool = True
+    source_enable_zhihu: bool = True
+    source_enable_csdn: bool = True
+
     model_config = SettingsConfigDict(
         env_file=str(_ENV_FILE_PATH), env_file_encoding="utf-8"
     )

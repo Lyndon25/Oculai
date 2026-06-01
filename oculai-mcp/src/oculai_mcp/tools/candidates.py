@@ -20,14 +20,16 @@ _NAME_REJECTION_PATTERNS = [
     # Article / tutorial titles
     re.compile(r"详解|教程|指南|入门|速览|解析|全解析|深度解析|原理|实战"
                r"|从.*到.*|如何.*|怎么.*|是什么|介绍|必读|系列|合集", re.I),
-    # Chinese article title markers
-    re.compile(r"[:：].{3,}"),  # colon with content after = almost certainly an article title
+    # Article title markers (language-agnostic)
+    re.compile(r"[:：].{5,}"),  # colon with 5+ chars after = almost certainly an article title
     re.compile(r"[《》「」『』]"),  # Chinese book/article quote marks
     re.compile(r"[@＠]"),  # social media handles / mentions
     # Generic / non-person
     re.compile(r"^\d+$"),  # pure numbers
     re.compile(r"^\d{4,}_\d+"),  # IDs like 2401_84419493
     re.compile(r"开心文库|哔哩哔哩|知乎|CSDN|掘金|博客园|简书"),  # platform names as "name"
+    # Bot / automation accounts
+    re.compile(r"dependabot|renovate|github.actions|semantic.release|ImgBot|snyk.bot|codecov|coveralls|\[bot\]", re.I),
 ]
 
 # Minimum signals required for a new Person to be considered valid
@@ -57,9 +59,6 @@ def _is_reasonable_person_name(name: str) -> tuple[bool, str]:
     # Chinese names: typically 2-4 hanzi, or hanzi + English name
     hanzi_count = sum(1 for ch in name if "一" <= ch <= "鿿")
     if hanzi_count > 0:
-        # If it's mostly Chinese but has strong article markers, reject
-        if hanzi_count >= 5 and any(c in name for c in "：:"):
-            return False, "name looks like a Chinese article title (contains colon and many characters)"
         # Reasonable Chinese name length
         if hanzi_count > 6 and len(name) > 12:
             return False, "name too long for a Chinese person name (>6 hanzi)"
@@ -163,6 +162,29 @@ async def upsert_candidate(
             "action": "rejected",
             "reason": f"INVALID_NAME: {name_reason}",
         }
+
+    # --- Gate 2.5: China-First signal check (soft) ---
+    from oculai_mcp.utils.chinese_names import has_china_affiliation
+    institution = person_data.get("institution")
+    profile_url = person_data.get("profile_url", "")
+    has_china = has_china_affiliation(institution, name)
+    if not has_china and profile_url:
+        has_china = any(d in profile_url.lower() for d in (
+            ".edu.cn", "juejin.cn", "zhihu.com", "csdn.net",
+            "baidu.com", "github.com",  # GitHub is global but many Chinese devs use it
+        ))
+    if not has_china:
+        raw_md = person_data.get("raw_metadata", {}) or {}
+        if isinstance(raw_md, dict):
+            meta_text = str(raw_md).lower()
+            china_keywords = [
+                "china", "chinese", "beijing", "shanghai", "tsinghua", "peking",
+                "zhejiang", "fudan", "sjtu", "ustc", "cas", "清华", "北大", "中科院",
+                "中科大", "浙大", "复旦", "上交", "北航", "哈工大", "字节", "阿里", "腾讯",
+            ]
+            has_china = any(kw in meta_text for kw in china_keywords)
+    if not has_china:
+        person_data["_china_first_flag"] = "no_china_signal"
 
     # --- Gate 3: check if this is a merge into existing person ---
     # If we matched an existing person by external ID, we allow lower signal

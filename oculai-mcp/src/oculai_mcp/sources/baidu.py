@@ -12,6 +12,7 @@ Requirements:
 
 import asyncio
 import logging
+import re
 import time
 from typing import Any
 
@@ -23,6 +24,66 @@ from oculai_mcp.db.quotas import check_quota, consume_quota
 from oculai_mcp.sources.base import HealthStatus, IDataSource, RawCandidate, SearchQuery
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Person-name extraction helpers for Baidu web-search results
+# ---------------------------------------------------------------------------
+
+_NAME_SEPARATOR_RE = re.compile(r"^([^|\-·\-\s]{2,30})\s*[|\-·\-]\s*")
+_CHINESE_NAME_RE = re.compile(r"^[一-鿿]{2,4}")
+_AUTHOR_PREFIX_RE = re.compile(r"(?:作者|by|writer)[:\s]*(.{2,30})", re.I)
+
+
+def _extract_person_name_from_title(title: str, snippet: str) -> str | None:
+    """Try to extract a person's name from a Baidu search result title/snippet.
+
+    Returns the name if a reasonable person name is found, otherwise None.
+    """
+    if not title:
+        return None
+
+    title = title.strip()
+
+    # Pattern 1: name before separator (e.g., "张三 - 百度百科", "李四 | 某大学")
+    m = _NAME_SEPARATOR_RE.match(title)
+    if m:
+        candidate = m.group(1).strip()
+        if _is_likely_person_name(candidate):
+            return candidate
+
+    # Pattern 2: Chinese name at the very start (2-4 hanzi)
+    m = _CHINESE_NAME_RE.match(title)
+    if m:
+        return m.group(0)
+
+    # Pattern 3: "作者：xxx" or "by xxx" in snippet
+    if snippet:
+        m = _AUTHOR_PREFIX_RE.search(snippet)
+        if m:
+            candidate = m.group(1).strip()
+            if _is_likely_person_name(candidate):
+                return candidate
+
+    return None
+
+
+def _is_likely_person_name(text: str) -> bool:
+    """Quick heuristic: does this look like a person name (not a title/company)?"""
+    if not text or len(text) < 2 or len(text) > 30:
+        return False
+    # Reject if it contains strong article/title markers
+    if any(c in text for c in "《》「」『』"):
+        return False
+    if re.search(r"[:：].{3,}", text):
+        return False
+    # Must have some alphabetic or CJK characters
+    if not re.search(r"[a-zA-Z一-鿿]", text):
+        return False
+    # Reject pure numbers
+    if text.isdigit():
+        return False
+    return True
+
 
 # baidusearch (no hyphen) is the actual package on PyPI.
 _BAIDU_SEARCH_AVAILABLE = False
@@ -160,36 +221,43 @@ class BaiduScholarSource(IDataSource):
                 url = item.get("url") or item.get("paper_url", "")
 
                 # Never fall back to paper title as a person's name.
+                # Split multi-author strings into separate candidates.
+                author_names: list[str] = []
                 if authors:
-                    name = str(authors)
-                    confidence = "high"
-                    extraction_method = "direct"
+                    raw = str(authors)
+                    for delim in (",", "，", ";", "；", " and ", " & "):
+                        if delim in raw:
+                            author_names = [a.strip() for a in raw.split(delim) if a.strip()]
+                            break
+                    if not author_names:
+                        author_names = [raw.strip()]
                 else:
-                    name = "Unknown"
-                    confidence = "low"
-                    extraction_method = "unverified"
+                    author_names = ["Unknown"]
 
-                candidates.append(
-                    RawCandidate(
-                        name=name,
-                        institution=journal,
-                        research_areas=[abstract[:500]] if abstract else None,
-                        profile_url=url or None,
-                        raw_metadata={
-                            "source": "baidu_scholar",
-                            "title": title,
-                            "authors": authors,
-                            "abstract": abstract,
-                            "paper_id": paper_id,
-                            "year": year,
-                            "journal": journal,
-                            "url": url,
-                        },
-                        result_type="paper",
-                        confidence=confidence,
-                        extraction_method=extraction_method,
+                for a_name in author_names:
+                    if not a_name or a_name in {c.name for c in candidates}:
+                        continue
+                    candidates.append(
+                        RawCandidate(
+                            name=a_name,
+                            institution=journal,
+                            research_areas=[abstract[:500]] if abstract else None,
+                            profile_url=url or None,
+                            raw_metadata={
+                                "source": "baidu_scholar",
+                                "title": title,
+                                "authors": authors,
+                                "abstract": abstract,
+                                "paper_id": paper_id,
+                                "year": year,
+                                "journal": journal,
+                                "url": url,
+                            },
+                            result_type="paper",
+                            confidence="high",
+                            extraction_method="direct",
+                        )
                     )
-                )
 
             await consume_quota(self.name, amount=len(candidates))
             duration_ms = int((time.perf_counter() - start) * 1000)
@@ -396,18 +464,30 @@ class BaiduSearchSource(IDataSource):
                 url = r.get("url", "") if isinstance(r, dict) else ""
                 snippet = r.get("abstract", "") if isinstance(r, dict) else ""
 
+                name = _extract_person_name_from_title(title, snippet)
+                if name:
+                    result_type = "profile_page"
+                    confidence = "medium"
+                    extraction_method = "inferred"
+                else:
+                    name = "Unknown"
+                    result_type = "web_page"
+                    confidence = "low"
+                    extraction_method = "unverified"
+
                 candidates.append(
                     RawCandidate(
-                        name=title[:200],
+                        name=name,
                         profile_url=url or None,
                         raw_metadata={
                             "source": "baidu_search",
+                            "title": title,
                             "snippet": snippet,
                             "url": url,
                         },
-                        result_type="web_page",
-                        confidence="low",
-                        extraction_method="unverified",
+                        result_type=result_type,
+                        confidence=confidence,
+                        extraction_method=extraction_method,
                     )
                 )
 

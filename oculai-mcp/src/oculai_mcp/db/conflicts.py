@@ -10,7 +10,7 @@ from oculai_mcp.db.client import execute_with_retry, fetch_with_retry
 async def record_conflict(entity_type: str, entity_id: UUID, field_name: str, values_json: list[dict[str, Any]]) -> UUID:
     result = await fetch_with_retry(
         "SELECT record_conflict($1, $2, $3, $4::jsonb) as conflict_id",
-        entity_type, entity_id, field_name, json.dumps(values_json),
+        entity_type, entity_id, field_name, values_json,
     )
     return result[0]["conflict_id"]
 

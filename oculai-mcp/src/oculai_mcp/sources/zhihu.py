@@ -123,6 +123,13 @@ class ZhihuSource(IDataSource):
                 business = obj.get("business", {}) or {}
                 company = business.get("name", "") if isinstance(business, dict) else ""
 
+                # Handle-like name check
+                _is_handle = False
+                if name:
+                    alpha = [c for c in name if c.isalpha()]
+                    if (len(name) < 4 and alpha and all(c.islower() for c in alpha)) or name.startswith("@") or name.isdigit():
+                        _is_handle = True
+
                 candidates.append(
                     RawCandidate(
                         name=name,
@@ -139,6 +146,9 @@ class ZhihuSource(IDataSource):
                             "voteup_count": obj.get("voteup_count", 0),
                             "avatar_url": obj.get("avatar_url", ""),
                         },
+                        result_type="web_page" if _is_handle else "profile_page",
+                        confidence="low" if _is_handle else "medium",
+                        extraction_method="unverified" if _is_handle else "direct",
                     )
                 )
 

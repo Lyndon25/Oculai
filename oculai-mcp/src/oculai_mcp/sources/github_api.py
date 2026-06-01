@@ -26,6 +26,29 @@ logger = logging.getLogger(__name__)
 GITHUB_API_BASE = "https://api.github.com"
 DEFAULT_PER_PAGE = 30
 
+# Bot / org accounts that should never enter the candidate pipeline
+_GITHUB_BOT_DENYLIST = {
+    "dependabot", "renovate", "renovate-bot", "github-actions",
+    "github-actions-bot", "semantic-release", "allcontributors",
+    "imgbotapp", "restyled-io", "greenkeeper", "snyk-bot",
+    "codecov-io", "coveralls", "codesandbox-ci", "vercel",
+    "netlify", "circleci", "travis-ci", "jenkins",
+}
+
+
+def _is_github_bot(login: str) -> bool:
+    """Return True if the login looks like a bot or automation account."""
+    if not login:
+        return False
+    low = login.lower()
+    if low in _GITHUB_BOT_DENYLIST:
+        return True
+    if low.endswith("[bot]"):
+        return True
+    if low.endswith("-bot") or low.endswith("_bot"):
+        return True
+    return False
+
 
 class GitHubAPISource(IDataSource):
     """Real GitHub REST API data source."""
@@ -181,6 +204,10 @@ class GitHubAPISource(IDataSource):
                 login = c.get("login")
                 if not login or login in seen_logins:
                     continue
+                if _is_github_bot(login):
+                    continue
+                if c.get("type") != "User":
+                    continue
                 seen_logins.add(login)
                 contributor_infos.append({
                     "login": login,
@@ -259,6 +286,10 @@ class GitHubAPISource(IDataSource):
         for item in data.get("items", [])[: query.limit]:
             login = item.get("login")
             if not login:
+                continue
+            if _is_github_bot(login):
+                continue
+            if item.get("type") != "User":
                 continue
 
             detail = await self.get_detail(login)
@@ -343,6 +374,10 @@ class GitHubAPISource(IDataSource):
                 duration_ms=duration_ms,
                 records_count=1,
             )
+
+            if data.get("type") == "Organization":
+                logger.debug("Skipping GitHub organization: %s", login)
+                return None
 
             real_name = data.get("name")
             name = real_name if real_name else (data.get("login") or login)

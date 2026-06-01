@@ -4,11 +4,14 @@ Upgraded from naive AVG to confidence-weighted, role-type-aware scoring
 with must-pass gate enforcement and full audit history.
 """
 
+import logging
 from typing import Any
 from uuid import UUID
 
 from oculai_mcp.db.client import execute_with_retry, fetch_with_retry, fetchrow_with_retry
-from oculai_mcp.tools.assessment_weights import check_gates, get_gates, get_weights
+from oculai_mcp.tools.assessment_weights import ROLE_WEIGHTS, check_gates, get_gates, get_weights
+
+logger = logging.getLogger(__name__)
 
 
 async def score_candidate(
@@ -260,6 +263,9 @@ async def _compute_overall_score(person_id: UUID, run_id: UUID, role_type: str =
     Uses role-type-specific weights and enforces must-pass gates.
     Gate failures cap overall score at 5.0 regardless of weighted average.
     """
+    if role_type not in ROLE_WEIGHTS:
+        logger.warning("Unknown role_type '%s' — falling back to 'default' weights", role_type)
+
     weights = get_weights(role_type)
     gates = get_gates(role_type)
 
@@ -278,6 +284,8 @@ async def _compute_overall_score(person_id: UUID, run_id: UUID, role_type: str =
         score = r["score"]
         conf = r["confidence"] if r["confidence"] is not None else 0.5
         w = weights.get(dim, 0.1)
+        if dim not in weights:
+            logger.warning("Dimension '%s' has no weight in role_type '%s' — using 0.1", dim, role_type)
 
         weighted_sum += score * w * conf
         confidence_sum += w * conf
