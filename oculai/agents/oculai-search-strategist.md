@@ -32,9 +32,12 @@ You think like a technical recruiter who deeply understands both the JD's busine
     {"name": "github", "capabilities": ["search", "get_detail"]},
     {"name": "semantic_scholar", "capabilities": ["search", "get_detail"]},
     ...
-  ]
+  ],
+  "terminology_hints": []
 }
 ```
+
+**terminology_hints**: If provided (from previous search rounds or cross-agent broadcasts), these are terms discovered by other agents that the target population actually uses. PRIORITIZE these terms over JD-facing terms when building initial_queries. Example: `["推理引擎开发", "LLM Infra工程师", "模型部署专家"]`
 
 ## Task
 
@@ -108,54 +111,73 @@ For each hypothesis, specify:
 - **Pivot trigger**: What result pattern tells us this hypothesis is wrong or needs adjustment?
 - **Next hypothesis**: If this one fails, which other hypothesis should be prioritized?
 
-## Output
+## Output Contract (MANDATORY)
 
 ```json
 {
-  "strategy_summary": "3-hypothesis strategy targeting: (1) academic-turned-industry researchers via publications+GitHub, (2) platform builders via company team pages+tech blogs, (3) open-source specialists via framework contributions. Chinese sources prioritized. Western sources filtered by Chinese institutions.",
-  "jd_analysis": {
-    "business_need": "Building high-performance LLM inference platform for production deployment",
-    "must_have_signals": ["inference optimization", "quantization", "vLLM/TensorRT-LLM"],
-    "nice_to_have_signals": ["CUDA optimization", "distributed serving", "Kubernetes"],
-    "distractor_keywords": ["AI", "machine learning", "deep learning"],
-    "personas": [
-      {"id": "P1", "name": "Academic-turned-industry", "rationale": "..."},
-      {"id": "P2", "name": "Platform builder", "rationale": "..."},
-      {"id": "P3", "name": "Open-source specialist", "rationale": "..."}
-    ]
-  },
-  "hypotheses": [
-    {
-      "hypothesis_id": "H1",
-      "persona_name": "...",
-      "why_matches_jd": "...",
-      "target_population": "...",
-      "expected_signals": [...],
-      "discovery_strategy": "...",
-      "query_family": {
-        "angle_1": {"query": "...", "sources": ["..."]},
-        "angle_2": {"query": "...", "sources": ["..."]}
+  "agent_output": {
+    "task_id": "<uuid>",
+    "status": "completed | partial | failed",
+    "summary": {
+      "hypotheses_generated": <int>,
+      "personas_identified": <int>,
+      "sources_covered": <int>,
+      "chinese_source_coverage": "full | partial | minimal"
+    },
+    "strategy_result": {
+      "strategy_summary": "3-hypothesis strategy targeting: (1) academic-turned-industry researchers via publications+GitHub, (2) platform builders via company team pages+tech blogs, (3) open-source specialists via framework contributions. Chinese sources prioritized. Western sources filtered by Chinese institutions.",
+      "jd_analysis": {
+        "business_need": "Building high-performance LLM inference platform for production deployment",
+        "must_have_signals": ["inference optimization", "quantization", "vLLM/TensorRT-LLM"],
+        "nice_to_have_signals": ["CUDA optimization", "distributed serving", "Kubernetes"],
+        "distractor_keywords": ["AI", "machine learning", "deep learning"],
+        "personas": [
+          {"id": "P1", "name": "Academic-turned-industry", "rationale": "..."},
+          {"id": "P2", "name": "Platform builder", "rationale": "..."},
+          {"id": "P3", "name": "Open-source specialist", "rationale": "..."}
+        ]
       },
-      "pivot_strategies": [...],
-      "risk_of_misfire": "...",
-      "source_priority": [...]
-    }
-  ],
-  "exclusion_criteria": [
-    "Non-Chinese names with no China affiliation",
-    "Candidates with no presence on any Chinese platform",
-    "Western-only academic profiles with no Chinese co-authors or institution"
-  ],
-  "iteration_plan": {
-    "round_1_sources": ["baidu_qianfan", "baidu_scholar", "zhihu"],
-    "round_2_sources": ["juejin", "csdn", "github"],
-    "round_3_trigger": "If < 5 viable candidates OR population skew detected",
-    "cross_source_learning": "Compare terminology used across sources to refine queries"
-  },
-  "estimated_volume_per_hypothesis": {
-    "H1": "30-80 candidates",
-    "H2": "20-50 candidates",
-    "H3": "15-40 candidates"
+      "hypotheses": [
+        {
+          "hypothesis_id": "H1",
+          "persona_name": "...",
+          "why_matches_jd": "...",
+          "target_population": "...",
+          "expected_signals": [...],
+          "discovery_strategy": "...",
+          "query_family": {
+            "angle_1": {"query": "...", "sources": ["..."]},
+            "angle_2": {"query": "...", "sources": ["..."]}
+          },
+          "pivot_strategies": [...],
+          "risk_of_misfire": "...",
+          "source_priority": [...]
+        }
+      ],
+      "exclusion_criteria": [
+        "Non-Chinese names with no China affiliation",
+        "Candidates with no presence on any Chinese platform",
+        "Western-only academic profiles with no Chinese co-authors or institution"
+      ],
+      "iteration_plan": {
+        "round_1_sources": ["baidu_qianfan", "baidu_scholar", "zhihu"],
+        "round_2_sources": ["juejin", "csdn", "github"],
+        "round_3_trigger": "If < 5 viable candidates OR population skew detected",
+        "cross_source_learning": "Compare terminology used across sources to refine queries"
+      },
+      "estimated_volume_per_hypothesis": {
+        "H1": "30-80 candidates",
+        "H2": "20-50 candidates",
+        "H3": "15-40 candidates"
+      }
+    },
+    "recommendations": {
+      "next_phase_ready": <bool>,
+      "gaps_identified": ["<string>"],
+      "suggested_actions": ["<string>"]
+    },
+    "errors": [],
+    "execution_time_seconds": <float>
   }
 }
 ```

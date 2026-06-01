@@ -20,7 +20,11 @@ from oculai_mcp.sources.base import HealthStatus, IDataSource, RawCandidate, Sea
 
 logger = logging.getLogger(__name__)
 
-# Top-tier conference venue identifiers for OpenAlex
+# Top-tier conference venue identifiers.
+# Keys are category slugs; values are ordered lists of display-name tokens
+# used for client-side venue matching.  The first few tokens are the short
+# acronyms (e.g. "NeurIPS", "ICML") — these are what we match against
+# OpenAlex's primary_location.source.display_name field.
 TOP_CONFERENCES: dict[str, list[str]] = {
     "machine_learning": [
         "NeurIPS", "ICML", "ICLR", "AISTATS", "UAI", "JMLR",
@@ -45,10 +49,12 @@ TOP_CONFERENCES: dict[str, list[str]] = {
     "systems": [
         "OSDI", "SOSP", "NSDI", "ATC", "EuroSys", "ASPLOS",
         "Symposium on Operating Systems Principles",
+        "Operating Systems Design and Implementation",
     ],
     "security": [
         "CCS", "S&P", "USENIX Security", "NDSS",
         "Conference on Computer and Communications Security",
+        "Symposium on Security and Privacy",
     ],
     "graphics": [
         "SIGGRAPH", "SIGGRAPH Asia", "Eurographics",
@@ -57,40 +63,60 @@ TOP_CONFERENCES: dict[str, list[str]] = {
     "databases": [
         "VLDB", "SIGMOD", "ICDE", "PODS",
         "Very Large Data Bases",
+        "International Conference on Management of Data",
+        "International Conference on Data Engineering",
     ],
     "theory": [
         "STOC", "FOCS", "SODA", "ICALP", "LICS",
         "Symposium on Theory of Computing",
+        "Foundations of Computer Science",
     ],
     "human_computer_interaction": [
         "CHI", "UIST", "CSCW", "IMWUT",
         "Conference on Human Factors in Computing Systems",
+        "User Interface Software and Technology",
     ],
 }
 
+# Mapping from short conference names to their category.
+# Enables users to pass "NeurIPS" or "CVPR" directly instead of "ml" / "cv".
+_CONF_ABBREVIATION_MAP: dict[str, str] = {}
+for _cat, _names in TOP_CONFERENCES.items():
+    for _name in _names:
+        _CONF_ABBREVIATION_MAP[_name.lower().replace(" ", "_")] = _cat
+        # Also add acronym-only forms for common ones
+        _acronym = _name.split()[0].lower()
+        if _acronym not in _CONF_ABBREVIATION_MAP:
+            _CONF_ABBREVIATION_MAP[_acronym] = _cat
+
+# OpenAlex source IDs for the categories that have them.
+# These are used only when we want to try server-side source.id filtering
+# (currently unused — we do client-side name matching because OpenAlex
+# scatters conference papers across annual proceedings volumes).
 CONF_VENUE_IDS: dict[str, list[str]] = {
-    # OpenAlex source IDs for top AI/CS conferences.
-    # Source IDs use the "S" prefix (e.g. S4393916742), not "V".
     "ml": [
-        "S4393916742",  # NeurIPS (Advances in Neural Information Processing Systems)
-        "S4306419644",  # ICML (International Conference on Machine Learning)
-        "S4306419637",  # ICLR (International Conference on Learning Representations)
+        "S4393916742",  # NeurIPS
+        "S4306419644",  # ICML
+        "S4306419637",  # ICLR
     ],
     "cv": [
-        "S4306419646",  # CVPR (Conference on Computer Vision and Pattern Recognition)
-        "S4306419647",  # ICCV (International Conference on Computer Vision)
-        "S4306419648",  # ECCV (European Conference on Computer Vision)
+        "S4306419646",  # CVPR
+        "S4306419647",  # ICCV
+        "S4306419648",  # ECCV
     ],
     "nlp": [
-        "S4306420508",  # ACL (Meeting of the ACL)
-        "S4363608991",  # EMNLP (Conference on Empirical Methods in Natural Language Processing)
-        "S4306420633",  # NAACL (North American Chapter of the ACL)
+        "S4306420508",  # ACL
+        "S4363608991",  # EMNLP
+        "S4306420633",  # NAACL
     ],
     "robotics": [
-        "S4306419649",  # ICRA (International Conference on Robotics and Automation)
-        "S4306419650",  # IROS (Intelligent Robots and Systems)
+        "S4306419649",  # ICRA
+        "S4306419650",  # IROS
     ],
+    # TODO: Add OpenAlex source IDs for systems, security, graphics,
+    # databases, theory, hci when available / needed for server-side filtering.
 }
+
 
 class ConferenceSource(IDataSource):
     """Conference proceedings search via OpenAlex venue filter.
@@ -103,7 +129,14 @@ class ConferenceSource(IDataSource):
         source = ConferenceSource()
         candidates = await source.search(SearchQuery(
             keywords=["transformer", "attention"],
-            conferences=["ml", "nlp"],  # ← new field
+            extra={"conferences": ["ml", "nlp"]},  # category slugs
+            limit=20,
+        ))
+        # Or with specific conference names:
+        candidates = await source.search(SearchQuery(
+            keywords=["reinforcement learning"],
+            extra={"conferences": ["NeurIPS", "ICML"]},  # specific venues
+            years=(2022, 2024),
             limit=20,
         ))
     """
@@ -123,6 +156,7 @@ class ConferenceSource(IDataSource):
         "nlp large language models acl emnlp",
         "computer vision object detection cvpr",
         "robotics manipulation icra iros",
+        "distributed systems osdi sosp",
     ]
     auth_required = False
     rate_limit_notes = "Delegates to OpenAlex (100k/day) and DBLP (unlimited)."
@@ -138,6 +172,8 @@ class ConferenceSource(IDataSource):
                 timeout=30.0,
             )
         return self._client
+
+    # ── Public API ──────────────────────────────────────────────────────
 
     async def search(self, query: SearchQuery) -> list[RawCandidate]:
         """Search for authors via conference proceedings."""
@@ -160,13 +196,13 @@ class ConferenceSource(IDataSource):
         try:
             client = await self._get_client()
 
-            # Build venue filter
-            venue_ids = self._resolve_venue_ids(conferences)
+            # Build venue name tokens for client-side filtering
+            venue_names = self._resolve_venue_names(conferences)
             candidates = await self._search_openalex_works(
-                client, keywords, venue_ids, query.limit
+                client, keywords, venue_names, query
             )
 
-            # Enrich with DBLP if available
+            # Enrich with DBLP if under quota
             if len(candidates) < query.limit:
                 dblp_candidates = await self._search_dblp_conference(
                     keywords, conferences, query.limit - len(candidates)
@@ -185,6 +221,7 @@ class ConferenceSource(IDataSource):
                 query_params={
                     "keywords": query.keywords,
                     "conferences": conferences,
+                    "years": query.years,
                     "limit": query.limit,
                 },
                 status="success",
@@ -198,7 +235,11 @@ class ConferenceSource(IDataSource):
             await log_source_call(
                 source_name=self.name,
                 source_type=self.source_type,
-                query_params={"keywords": query.keywords, "conferences": conferences},
+                query_params={
+                    "keywords": query.keywords,
+                    "conferences": conferences,
+                    "years": query.years,
+                },
                 status="failed",
                 duration_ms=duration_ms,
                 error_message=str(e),
@@ -207,25 +248,68 @@ class ConferenceSource(IDataSource):
 
         return candidates
 
-    def _resolve_venue_ids(self, conferences: list[str]) -> list[str]:
-        """Resolve conference area names to OpenAlex venue IDs."""
-        venue_ids: list[str] = []
-        for area in conferences:
-            area_lower = area.lower().replace(" ", "_")
-            ids = CONF_VENUE_IDS.get(area_lower, [])
-            venue_ids.extend(ids)
-        # If no specific venues selected, use all CS venues
-        if not venue_ids:
-            for ids_list in CONF_VENUE_IDS.values():
-                venue_ids.extend(ids_list)
-        return venue_ids
+    # ── Internal helpers ────────────────────────────────────────────────
+
+    def _resolve_venue_names(self, conferences: list[str]) -> list[str]:
+        """Resolve conference specifiers to lowercased venue-name tokens.
+
+        Accepts:
+        * Category slugs:  "ml", "cv", "nlp", "robotics", "systems",
+                           "security", "graphics", "databases",
+                           "theory", "hci"
+        * Area names:      "machine_learning", "computer_vision", etc.
+        * Specific venues: "NeurIPS", "CVPR", "ACL", "OSDI", "CHI", …
+
+        Returns a deduplicated list of lowercased tokens suitable for
+        client-side matching against OpenAlex source.display_name.
+        """
+        if not conferences:
+            # Default: all top conferences
+            tokens: set[str] = set()
+            for names in TOP_CONFERENCES.values():
+                for n in names[:3]:
+                    tokens.add(n.lower())
+            return sorted(tokens)
+
+        tokens: set[str] = set()
+        for spec in conferences:
+            spec_norm = spec.lower().replace(" ", "_")
+
+            # Direct category match?
+            if spec_norm in TOP_CONFERENCES:
+                for n in TOP_CONFERENCES[spec_norm][:5]:
+                    tokens.add(n.lower())
+                continue
+
+            # Known abbreviation / specific venue name?
+            if spec_norm in _CONF_ABBREVIATION_MAP:
+                cat = _CONF_ABBREVIATION_MAP[spec_norm]
+                for n in TOP_CONFERENCES[cat][:5]:
+                    tokens.add(n.lower())
+                continue
+
+            # Fuzzy: try matching against any known name
+            for cat, names in TOP_CONFERENCES.items():
+                if spec_norm == cat:
+                    for n in names[:5]:
+                        tokens.add(n.lower())
+                    break
+                for n in names:
+                    if spec_norm in n.lower().replace(" ", "_"):
+                        tokens.add(n.lower())
+                        break
+            else:
+                # Unknown — pass through as-is; OpenAlex may still match
+                tokens.add(spec_norm)
+
+        return sorted(tokens)
 
     async def _search_openalex_works(
         self,
         client: httpx.AsyncClient,
         keywords: str,
-        venue_ids: list[str],
-        limit: int,
+        venue_names: list[str],
+        query: SearchQuery,
     ) -> list[RawCandidate]:
         """Search OpenAlex works by keyword, filter by venue display name.
 
@@ -234,15 +318,24 @@ class ConferenceSource(IDataSource):
         volumes, each with its own source ID. Instead we search broadly
         and match venue names client-side.
         """
-        # Build a set of lowercase venue-name substrings to match against
-        venue_names_lower = self._get_venue_names(venue_ids)
-        logger.debug("Matching against venue names: %s", venue_names_lower)
+        logger.debug("Matching against venue names: %s", venue_names)
 
         params: dict[str, str | int] = {
             "search": keywords,
-            "per_page": min(limit * 5, 100),
+            "per_page": min(query.limit * 5, 100),
             "sort": "cited_by_count:desc",
         }
+
+        # Add year filter when available
+        if query.years:
+            start_year, end_year = query.years
+            if start_year and end_year:
+                params["filter"] = f"publication_year:{start_year}-{end_year}"
+            elif start_year:
+                params["filter"] = f"publication_year:>={start_year}"
+            elif end_year:
+                params["filter"] = f"publication_year:<={end_year}"
+
         resp = await client.get("/works", params=params)
         resp.raise_for_status()
         data = resp.json()
@@ -254,8 +347,8 @@ class ConferenceSource(IDataSource):
             source_info = primary_loc.get("source") or {}
             venue_name = (source_info.get("display_name") or "").lower()
 
-            if venue_names_lower and not any(
-                vn in venue_name for vn in venue_names_lower
+            if venue_names and not any(
+                vn in venue_name for vn in venue_names
             ):
                 continue  # skip works not in a target venue
 
@@ -309,22 +402,8 @@ class ConferenceSource(IDataSource):
                     "top_venue": a.get("venue"),
                 },
             )
-            for a in sorted_authors[:limit]
+            for a in sorted_authors[: query.limit]
         ]
-
-    def _get_venue_names(self, venue_ids: list[str]) -> list[str]:
-        """Translate venue source IDs back to lowercased display-name tokens
-        for client-side matching."""
-        # Reverse lookup: for each source ID, find the corresponding
-        # TOP_CONFERENCES category and return its name tokens.
-        name_tokens: list[str] = []
-        for category, names in TOP_CONFERENCES.items():
-            cat_ids = CONF_VENUE_IDS.get(category, [])
-            if any(vid in venue_ids for vid in cat_ids):
-                # Use the short acronyms as match tokens (e.g. "neurips", "icml")
-                for n in names[:3]:
-                    name_tokens.append(n.lower())
-        return list(set(name_tokens))
 
     async def _search_dblp_conference(
         self,
@@ -341,10 +420,20 @@ class ConferenceSource(IDataSource):
 
             # Append conference names to keywords for DBLP search
             conf_keywords = []
-            for area in conferences:
-                area_lower = area.lower().replace("_", " ")
-                names = TOP_CONFERENCES.get(area_lower, [])[:3]
-                conf_keywords.extend(names)
+            for spec in conferences:
+                spec_norm = spec.lower().replace("_", " ")
+                # Direct category?
+                if spec_norm in TOP_CONFERENCES:
+                    names = TOP_CONFERENCES[spec_norm][:3]
+                    conf_keywords.extend(names)
+                elif spec_norm in _CONF_ABBREVIATION_MAP:
+                    cat = _CONF_ABBREVIATION_MAP[spec_norm]
+                    names = TOP_CONFERENCES[cat][:3]
+                    conf_keywords.extend(names)
+                else:
+                    # Pass through as-is
+                    conf_keywords.append(spec)
+
             search_terms = f"{keywords} {' '.join(conf_keywords[:3])}"
 
             query = SearchQuery(keywords=[search_terms], limit=limit)

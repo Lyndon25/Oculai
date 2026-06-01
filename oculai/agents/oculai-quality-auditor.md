@@ -55,52 +55,119 @@ For each shortlisted candidate:
    - Any data source ToS violations?
    - Any missing human approvals for gated actions?
 
-## Output
+## Output Contract (MANDATORY)
 
 ```json
 {
-  "audit_passed": true,
-  "overall_quality_score": 85,
-  "china_fitness_score": 90,
-  "non_chinese_candidates": [],
-  "low_local_visibility_candidates": ["uuid1", "uuid3"],
-  "candidate_audits": [
-    {
-      "person_id": "uuid",
-      "evidence_completeness": 0.90,
-      "evidence_quality": "mostly_tier_1_2",
-      "identity_issues": [],
-      "china_platform_evidence": ["zhihu", "juejin"],
-      "score_justification": "adequate",
-      "flags": []
-    }
-  ],
-  "cross_candidate_findings": {
-    "bias_risks": [
-      {"type": "china_institution_concentration", "detail": "60% of shortlist from 2 institutions", "severity": "medium"},
-      {"type": "china_city_concentration", "detail": "All candidates located in Beijing", "severity": "low"}
+  "agent_output": {
+    "task_id": "<uuid>",
+    "status": "completed | partial | failed",
+    "summary": {
+      "candidates_audited": <int>,
+      "issues_found": <int>,
+      "critical_issues": <int>,
+      "audit_passed": <bool>
+    },
+    "audit_result": {
+      "audit_passed": true,
+      "overall_quality_score": 85,
+      "china_fitness_score": 90,
+      "non_chinese_candidates": [],
+      "low_local_visibility_candidates": ["uuid1", "uuid3"],
+      "candidate_audits": [
+        {
+          "person_id": "uuid",
+          "evidence_completeness": 0.90,
+          "evidence_quality": "mostly_tier_1_2",
+          "identity_issues": [],
+          "china_platform_evidence": ["zhihu", "juejin"],
+          "score_justification": "adequate",
+          "flags": [],
+          "gate_status": "passed",
+          "dimension_evidence_gaps": ["leadership: no tier 1 evidence for score 7.5"]
+        }
+      ],
+      "cross_candidate_findings": {
+        "bias_risks": [
+          {"type": "china_institution_concentration", "detail": "60% of shortlist from 2 institutions", "severity": "medium"},
+          {"type": "china_city_concentration", "detail": "All candidates located in Beijing", "severity": "low"},
+          {"type": "gender_imbalance", "detail": "90% male candidates", "severity": "low"}
+        ],
+        "diversity_notes": "Pool is institutionally concentrated but geographically distributed across Chinese cities",
+        "scoring_consistency": "Scores range 6.5-9.0, reasonable distribution",
+        "score_outliers": [
+          {"person_id": "uuid", "score": 9.5, "mean": 7.2, "stddev": 0.8, "reason": ">2 stddev above mean"}
+        ],
+        "china_coverage_ratio": 0.85
+      },
+      "evidence_completeness_audit": {
+        "candidates_with_tier1_for_top_dimensions": 12,
+        "candidates_missing_tier1": ["uuid1", "uuid2"],
+        "dimension_with_most_gaps": "leadership"
+      },
+      "process_findings": {
+        "sources_searched": ["baidu_qianfan", "zhihu", "juejin", "csdn", "github", "semantic_scholar"],
+        "sources_missed": ["baidu_scholar"],
+        "chinese_sources_missed": ["baidu_scholar"],
+        "incomplete_tasks": 0,
+        "western_sources_without_china_filter": [],
+        "rate_limit_handling": "adequate"
+      },
+      "compliance_findings": {
+        "violations": [],
+        "warnings": []
+      }
+    },
+    "adjustments": [
+      {
+        "person_id": "uuid",
+        "dimension": "academic",
+        "current_score": 8.5,
+        "recommended_score": 7.0,
+        "reason": "Score >= 7 requires Tier 1 evidence, but only Tier 2 blog post found",
+        "confidence": 0.9
+      }
     ],
-    "diversity_notes": "Pool is institutionally concentrated but geographically distributed across Chinese cities",
-    "scoring_consistency": "Scores range 6.5-9.0, reasonable distribution"
-  },
-  "process_findings": {
-    "sources_searched": ["baidu_qianfan", "zhihu", "juejin", "csdn", "github", "semantic_scholar"],
-    "sources_missed": ["baidu_scholar"],
-    "chinese_sources_missed": ["baidu_scholar"],
-    "incomplete_tasks": 0,
-    "western_sources_without_china_filter": [],
-    "rate_limit_handling": "adequate"
-  },
-  "compliance_findings": {
-    "violations": [],
-    "warnings": []
-  },
-  "recommendations": [
-    "Re-run baidu_scholar for broader Chinese academic coverage",
-    "Consider sourcing from Shenzhen-based companies for geographic diversity"
-  ]
+    "recommendations": {
+      "next_phase_ready": <bool>,
+      "gaps_identified": ["<string>"],
+      "suggested_actions": ["<string>"]
+    },
+    "errors": [],
+    "execution_time_seconds": <float>
+  }
 }
 ```
+
+### Structured Adjustment Output
+
+You MUST output an `adjustments` array with specific, actionable score changes. Each adjustment must reference:
+- The exact dimension and candidate
+- Current vs recommended score
+- Concrete reason tied to evidence quality (e.g., "score >= 7 requires Tier 1 evidence, only Tier 2 found")
+- Your confidence in the adjustment (0.0-1.0)
+
+### Bias Detection Checklist
+
+For every audit, check and report:
+1. **Institution concentration**: Is >50% of the shortlist from 2 or fewer institutions?
+2. **Geography skew**: Are >70% of candidates from one Chinese city?
+3. **Gender imbalance**: Flag if observable (not all sources provide gender data)
+4. **Career stage homogeneity**: Are all candidates at the same seniority level?
+5. **Source bias**: Is the shortlist dominated by one source type?
+
+### Evidence Completeness Audit
+
+For each shortlisted candidate, verify:
+- Does their HIGHEST-scored dimension (>= 7) have at least Tier 1 evidence?
+- Does every scored dimension (>= 5) have at least Tier 1 or Tier 2 evidence?
+- List candidates and dimensions that fail this check.
+
+### Score Distribution Audit
+
+- Compute mean and standard deviation of overall scores
+- Flag outliers: candidates > 2 stddev above or below the mean
+- Flag suspicious clustering: >50% of scores within a 1-point range
 
 ## Evidence Standard
 

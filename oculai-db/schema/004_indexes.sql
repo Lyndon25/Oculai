@@ -135,6 +135,19 @@ CREATE INDEX IF NOT EXISTS idx_fe_type ON FeedbackEvent (event_type);
 CREATE INDEX IF NOT EXISTS idx_fe_provided_at ON FeedbackEvent (provided_at DESC);
 
 -- ============================================================
+-- TaskIteration indexes
+-- ============================================================
+CREATE INDEX IF NOT EXISTS idx_task_iteration_task ON TaskIteration (task_id, iteration_number);
+CREATE INDEX IF NOT EXISTS idx_task_iteration_type ON TaskIteration (iteration_type, created_at);
+CREATE INDEX IF NOT EXISTS idx_task_iteration_decision ON TaskIteration (decision, created_at);
+
+-- ============================================================
+-- AgentBroadcast indexes
+-- ============================================================
+CREATE INDEX IF NOT EXISTS idx_broadcast_run ON AgentBroadcast (run_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_broadcast_discovered_by ON AgentBroadcast (run_id, discovered_by, created_at DESC);
+
+-- ============================================================
 -- SearchQueryLog indexes
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_sql_source ON SearchQueryLog (source_name, fetched_at DESC);

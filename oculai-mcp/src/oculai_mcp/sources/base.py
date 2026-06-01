@@ -7,7 +7,13 @@ from typing import Any
 
 @dataclass
 class RawCandidate:
-    """Raw candidate data from a data source."""
+    """Raw candidate data from a data source.
+
+    The MCP layer returns RawCandidate with honest metadata about how the data
+    was extracted. The Agent layer uses result_type, confidence, and
+    extraction_method to decide whether this is a real person and how to
+    verify it.
+    """
     name: str
     institution: str | None = None
     email: str | None = None
@@ -22,6 +28,12 @@ class RawCandidate:
     research_areas: list[str] | None = None
     profile_url: str | None = None
     raw_metadata: dict[str, Any] | None = None
+
+    # Quality metadata — populated by the source connector to help the Agent
+    # classify and filter results. The Agent is the final arbiter.
+    result_type: str = "unknown"  # profile_page | article | paper | job_posting | web_page | unknown
+    confidence: str = "medium"    # high | medium | low
+    extraction_method: str = "direct"  # direct | inferred | fallback | unverified
 
 
 @dataclass
@@ -73,6 +85,8 @@ class SearchResult:
                     "paper_count": c.paper_count, "h_index": c.h_index,
                     "citation_count": c.citation_count, "research_areas": c.research_areas,
                     "profile_url": c.profile_url, "raw_metadata": c.raw_metadata,
+                    "result_type": c.result_type, "confidence": c.confidence,
+                    "extraction_method": c.extraction_method,
                 }
                 for c in self.candidates
             ],

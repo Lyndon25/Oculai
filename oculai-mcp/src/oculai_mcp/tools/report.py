@@ -49,8 +49,9 @@ async def export_report(run_id: UUID, format: str = "html") -> dict[str, Any]:
         run_id,
     )
 
-    # Build report
+    # Build report — with filtering of garbage candidates
     candidate_list = []
+    filtered_candidates = []
     for c in candidates:
         assessments = await fetch_with_retry(
             "SELECT dimension, score, confidence, rationale FROM candidateassessment WHERE run_id = $1 AND person_id = $2",
@@ -59,8 +60,29 @@ async def export_report(run_id: UUID, format: str = "html") -> dict[str, Any]:
         evidence_count = await fetchrow_with_retry(
             "SELECT COUNT(*) as cnt FROM evidence WHERE person_id = $1", c["person_id"],
         )
+        ev_count = evidence_count["cnt"] if evidence_count else 0
 
-        candidate_list.append({
+        # Gate status from match_scores JSONB
+        gate_status = "unknown"
+        match_scores = c.get("match_scores") or {}
+        if isinstance(match_scores, dict):
+            gate_status = match_scores.get("gate_status", "unknown")
+
+        # Evidence details with tier
+        ev_rows = await fetch_with_retry(
+            "SELECT tier, source_name, title, confidence, quality_flags FROM evidence WHERE person_id = $1 ORDER BY tier ASC, confidence DESC LIMIT 10",
+            c["person_id"],
+        )
+        evidence_details = [dict(r) for r in ev_rows]
+
+        # Score history
+        hist_rows = await fetch_with_retry(
+            "SELECT new_score as score, dimension, changed_at FROM assessmentscorehistory WHERE run_id = $1 AND person_id = $2 ORDER BY changed_at ASC",
+            run_id, c["person_id"],
+        )
+        score_history = [{"score": r["score"], "dimension": r["dimension"], "at": str(r["changed_at"])} for r in hist_rows]
+
+        candidate_item = {
             "name": c["canonical_name"],
             "institution": c["latest_institution"],
             "position": c["latest_position"],
@@ -74,8 +96,19 @@ async def export_report(run_id: UUID, format: str = "html") -> dict[str, Any]:
             "status": c["status"],
             "overall_score": c["quality_score"],
             "dimension_scores": {a["dimension"]: {"score": a["score"], "confidence": a["confidence"], "rationale": a["rationale"]} for a in assessments},
-            "evidence_count": evidence_count["cnt"] if evidence_count else 0,
-        })
+            "evidence_count": ev_count,
+            "evidence_details": evidence_details,
+            "score_history": score_history,
+            "gate_status": gate_status,
+            "audit_flags": [],
+        }
+
+        # Filter check
+        filter_reason = _filter_reason(candidate_item)
+        if filter_reason:
+            filtered_candidates.append({"name": candidate_item["name"], "reason": filter_reason})
+        else:
+            candidate_list.append(candidate_item)
 
     report = {
         "run": {
@@ -91,6 +124,8 @@ async def export_report(run_id: UUID, format: str = "html") -> dict[str, Any]:
         "task_summary": [dict(t) for t in task_summary],
         "candidates": candidate_list,
         "candidate_count": len(candidate_list),
+        "filtered_candidates": filtered_candidates,
+        "filtered_count": len(filtered_candidates),
         "shortlist_cutoff": None,
     }
 
@@ -699,6 +734,128 @@ h1, h2, h3, h4 {
 }
 .empty-state p { font-size: 14px; }
 
+/* ---- Gate Status Indicator ---- */
+.gate-status {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: var(--radius-sm);
+    font-size: 10px; font-weight: 700; letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+.gate-passed { background: var(--good-soft); color: var(--good); }
+.gate-failed { background: var(--bad-soft); color: var(--bad); }
+
+/* ---- Audit Badge ---- */
+.audit-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: var(--radius-sm);
+    font-size: 10px; font-weight: 700;
+    background: var(--warn-soft); color: var(--warn);
+}
+
+/* ---- Evidence Detail Panel (CSS-only expand) ---- */
+.evidence-panel { margin-top: 10px; }
+.evidence-toggle {
+    display: none;
+}
+.evidence-label {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 600; color: var(--accent);
+    cursor: pointer; padding: 4px 0;
+}
+.evidence-label::after {
+    content: "+"; font-size: 13px; font-weight: 700;
+}
+.evidence-toggle:checked + .evidence-label::after {
+    content: "-";
+}
+.evidence-details {
+    display: none;
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+.evidence-toggle:checked ~ .evidence-details {
+    display: block;
+}
+.evidence-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 0; font-size: 11px;
+    border-bottom: 1px solid var(--border);
+}
+.evidence-item:last-child { border-bottom: none; }
+.evidence-tier {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 16px; border-radius: 3px;
+    font-size: 9px; font-weight: 800; color: #fff;
+    flex-shrink: 0;
+}
+.tier-1 { background: var(--good); }
+.tier-2 { background: var(--accent); }
+.tier-3 { background: var(--warn); }
+.tier-4 { background: var(--caution); }
+.tier-0 { background: var(--text-muted); }
+.evidence-source { font-weight: 600; color: var(--text-secondary); min-width: 60px; }
+.evidence-title { color: var(--text); flex: 1; }
+.evidence-confidence { color: var(--text-muted); font-family: "SF Mono", monospace; }
+.evidence-flags { color: var(--caution); font-style: italic; }
+
+/* ---- Score History Sparkline ---- */
+.score-history {
+    font-size: 10px; color: var(--text-muted);
+    margin-top: 4px; font-family: "SF Mono", monospace;
+}
+
+/* ---- Audit Findings Panel ---- */
+.audit-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    margin-bottom: 20px;
+}
+.audit-panel h3 {
+    font-size: 12px; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 14px;
+}
+.audit-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px; margin-bottom: 16px;
+}
+@media (max-width: 640px) {
+    .audit-stat-grid { grid-template-columns: repeat(2, 1fr); }
+}
+.audit-stat {
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    text-align: center;
+}
+.audit-stat .audit-stat-value {
+    font-size: 20px; font-weight: 800;
+    font-family: "SF Mono", monospace;
+}
+.audit-stat .audit-stat-label {
+    font-size: 10px; color: var(--text-muted); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.03em; margin-top: 4px;
+}
+
+/* ---- Tier Distribution (CSS conic-gradient pie) ---- */
+.tier-pie {
+    width: 80px; height: 80px; border-radius: 50%;
+    position: relative;
+}
+.tier-pie-label {
+    position: absolute; inset: 0; display: flex;
+    align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: var(--text-muted);
+}
+
 /* ---- Footer ---- */
 .report-footer {
     text-align: center; padding: 32px 24px;
@@ -904,6 +1061,77 @@ def _render_html(report: dict[str, Any]) -> str:
         '</div>',
     ])
 
+    # ========== REVIEW PROCESS SUMMARY ==========
+    # Compute evidence tier stats
+    tier_counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0}
+    total_ev_items = 0
+    gate_passed = 0
+    gate_failed = 0
+    for c in candidates:
+        for ev in c.get("evidence_details", []):
+            tier_counts[ev.get("tier", 0)] = tier_counts.get(ev.get("tier", 0), 0) + 1
+            total_ev_items += 1
+        gs = c.get("gate_status", "unknown")
+        if gs == "passed":
+            gate_passed += 1
+        elif gs == "failed":
+            gate_failed += 1
+
+    parts.extend([
+        '<div class="section-card">',
+        '<div class="section-title">审阅流程摘要</div>',
+        '<div class="audit-stat-grid">',
+        f'<div class="audit-stat"><div class="audit-stat-value">{len(candidates)}</div><div class="audit-stat-label">候选人总数</div></div>',
+        f'<div class="audit-stat"><div class="audit-stat-value" style="color:var(--good)">{gate_passed}</div><div class="audit-stat-label">门槛通过</div></div>',
+        f'<div class="audit-stat"><div class="audit-stat-value" style="color:var(--bad)">{gate_failed}</div><div class="audit-stat-label">门槛未过</div></div>',
+        f'<div class="audit-stat"><div class="audit-stat-value">{total_ev_items}</div><div class="audit-stat-label">证据条目</div></div>',
+        '</div>',
+        '</div>',
+    ])
+
+    # ========== EVIDENCE QUALITY DASHBOARD ==========
+    if total_ev_items > 0:
+        parts.extend([
+            '<div class="viz-grid">',
+            '<div class="viz-panel">',
+            '<h3>证据层级分布</h3>',
+            '<div class="source-viz">',
+        ])
+        tier_labels = {1: "Tier 1 (Primary)", 2: "Tier 2 (Secondary)", 3: "Tier 3 (Indirect)", 4: "Tier 4 (Inferred)", 0: "Ungraded"}
+        tier_colors = {1: "var(--good)", 2: "var(--accent)", 3: "var(--warn)", 4: "var(--caution)", 0: "var(--text-muted)"}
+        for tier in [1, 2, 3, 4, 0]:
+            count = tier_counts.get(tier, 0)
+            width = (count / max(total_ev_items, 1) * 100)
+            parts.append(
+                '<div class="source-row">'
+                f'<div class="source-name">{tier_labels.get(tier, f"Tier {tier}")}</div>'
+                '<div class="source-track">'
+                f'<div class="source-bar" style="width:{width:.0f}%;background:{tier_colors.get(tier, "var(--accent)")}"></div>'
+                '</div>'
+                f'<div class="source-count">{count}</div>'
+                '</div>'
+            )
+        parts.append('</div></div>')
+        # Gate status pie (CSS conic-gradient)
+        total_gated = gate_passed + gate_failed
+        if total_gated > 0:
+            pass_pct = gate_passed / total_gated * 100
+            fail_pct = gate_failed / total_gated * 100
+            parts.extend([
+                '<div class="viz-panel">',
+                '<h3>门槛通过状态</h3>',
+                '<div style="display:flex;align-items:center;gap:20px">',
+                f'<div class="tier-pie" style="background:conic-gradient(var(--good) 0% {pass_pct:.0f}%, var(--bad) {pass_pct:.0f}% 100%)">'
+                '<div class="tier-pie-label">通过率</div></div>',
+                '<div style="font-size:12px">',
+                f'<div style="color:var(--good);font-weight:700">通过: {gate_passed} ({pass_pct:.0f}%)</div>',
+                f'<div style="color:var(--bad);font-weight:700;margin-top:4px">未过: {gate_failed} ({fail_pct:.0f}%)</div>',
+                '</div>',
+                '</div>',
+                '</div>',
+            ])
+        parts.append('</div>')  # close viz-grid
+
     # ========== CANDIDATES ==========
     parts.extend([
         '<div class="section-card">',
@@ -918,8 +1146,35 @@ def _render_html(report: dict[str, Any]) -> str:
         )
     else:
         for idx, c in enumerate(candidates, 1):
-            parts.append(_candidate_card(idx, c))
+            parts.append(_candidate_card(idx, c, role_type="default"))
     parts.append("</div>")
+
+    # ========== FILTERED CANDIDATES ==========
+    filtered = report.get("filtered_candidates", [])
+    if filtered:
+        parts.extend([
+            '<div class="section-card">',
+            f'<div class="section-title">已自动过滤的低质量数据（共 {len(filtered)} 条）</div>',
+            '<p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">'
+            '以下条目因不符合人物识别标准而被自动排除。若数量过多，说明上游 Agent 未正确执行数据验证协议。'
+            '</p>',
+            '<table style="width:100%;font-size:12px">',
+            '<thead><tr><th style="text-align:left;padding:6px;border-bottom:1px solid var(--border)">原始名称</th>'
+            '<th style="text-align:left;padding:6px;border-bottom:1px solid var(--border)">过滤原因</th></tr></thead>',
+            '<tbody>',
+        ])
+        for f in filtered[:30]:  # cap at 30 rows
+            parts.append(
+                '<tr>'
+                f'<td style="padding:6px;border-bottom:1px solid var(--border);color:var(--text-secondary)">{_esc(f["name"] or "—")}</td>'
+                f'<td style="padding:6px;border-bottom:1px solid var(--border);color:var(--bad)">{_esc(f["reason"])}</td>'
+                '</tr>'
+            )
+        if len(filtered) > 30:
+            parts.append(
+                f'<tr><td colspan="2" style="padding:6px;color:var(--text-muted)">... 还有 {len(filtered) - 30} 条未显示</td></tr>'
+            )
+        parts.extend(['</tbody></table>', '</div>'])
 
     # ========== FOOTER ==========
     parts.extend([
@@ -955,10 +1210,10 @@ _STATUS_LABELS = {
 }
 
 
-def _candidate_card(idx: int, c: dict[str, Any]) -> str:
+def _candidate_card(idx: int, c: dict[str, Any], role_type: str = "default") -> str:
     """Render a single candidate card with donut chart and dim mini-bars."""
     score = c["overall_score"] or 0
-    score_tier, dim_tier = _score_tier(score)
+    score_tier, dim_tier = _score_tier(score, role_type)
     rank_str = f"#{idx}"
     top_class = " top-pick" if idx <= 3 else ""
 
@@ -969,6 +1224,15 @@ def _candidate_card(idx: int, c: dict[str, Any]) -> str:
     status_label, status_class = _STATUS_LABELS.get(
         c["status"], ("评估中", "status-default")
     )
+
+    # Gate status
+    gate_status = c.get("gate_status", "unknown")
+    gate_class = "gate-passed" if gate_status == "passed" else "gate-failed" if gate_status == "failed" else ""
+    gate_text = "门槛通过" if gate_status == "passed" else "门槛未过" if gate_status == "failed" else ""
+
+    # Audit badge
+    audit_flags = c.get("audit_flags", [])
+    audit_count = len(audit_flags)
 
     lines = [
         f'<div class="candidate-card{top_class}">',
@@ -982,7 +1246,11 @@ def _candidate_card(idx: int, c: dict[str, Any]) -> str:
         f"<div class='institution'>{_esc(c['institution'] or '—')}</div>",
         f"<div class='position'>{_esc(c['position'] or '')}</div>" if c.get("position") else "",
         "</div>",
+        '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">',
         f"<span class='status-tag {status_class}'>{status_label}</span>",
+        f"<span class='gate-status {gate_class}'>{gate_text}</span>" if gate_text else "",
+        f'<span class="audit-badge">{audit_count} 项审计发现</span>' if audit_count > 0 else "",
+        "</div>",
         "</div>",
     ]
 
@@ -1010,7 +1278,7 @@ def _candidate_card(idx: int, c: dict[str, Any]) -> str:
         for dim, s in sorted_dims:
             sc = s["score"] or 0
             conf = s.get("confidence", 0.0)
-            _, fill_tier = _score_tier(sc)
+            _, fill_tier = _score_tier(sc, role_type)
             dim_name = _DIM_LABELS.get(dim, dim)
             dim_fill_class = f"dim-fill-{fill_tier.replace('bar-', '')}"
             conf_note = f"（置信度 {conf:.0%}）" if conf < 0.6 else ""
@@ -1026,6 +1294,40 @@ def _candidate_card(idx: int, c: dict[str, Any]) -> str:
                 '</div>'
             )
         lines.append("</div>")
+
+    # -- Evidence detail panel (CSS-only expand) --
+    ev_details = c.get("evidence_details", [])
+    if ev_details:
+        toggle_id = f"ev-toggle-{idx}"
+        lines.append('<div class="evidence-panel">')
+        lines.append(f'<input type="checkbox" id="{toggle_id}" class="evidence-toggle"/>')
+        lines.append(f'<label for="{toggle_id}" class="evidence-label">证据详情 ({len(ev_details)})</label>')
+        lines.append('<div class="evidence-details">')
+        for ev in ev_details[:5]:  # top 5
+            tier = ev.get("tier", 0)
+            tier_class = f"tier-{tier}"
+            tier_label = {1: "T1", 2: "T2", 3: "T3", 4: "T4", 0: "T?"}.get(tier, "T?")
+            flags = ev.get("quality_flags", [])
+            flags_text = f" [{', '.join(flags)}]" if flags else ""
+            lines.append(
+                '<div class="evidence-item">'
+                f'<span class="evidence-tier {tier_class}">{tier_label}</span>'
+                f'<span class="evidence-source">{_esc(ev.get("source_name", "?"))}</span>'
+                f'<span class="evidence-title">{_esc(ev.get("title", "—"))}</span>'
+                f'<span class="evidence-confidence">{ev.get("confidence", 1.0):.0%}</span>'
+                f'<span class="evidence-flags">{_esc(flags_text)}</span>'
+                '</div>'
+            )
+        if len(ev_details) > 5:
+            lines.append(f'<div style="font-size:10px;color:var(--text-muted);padding:4px 0">... 还有 {len(ev_details) - 5} 条</div>')
+        lines.append('</div>')  # close evidence-details
+        lines.append('</div>')  # close evidence-panel
+
+    # -- Score history sparkline --
+    score_history = c.get("score_history", [])
+    if score_history:
+        history_str = " → ".join([f"{h['score']:.1f}" for h in score_history])
+        lines.append(f'<div class="score-history">评分轨迹: {history_str}</div>')
 
     # -- Footer: evidence pill + IDs --
     if evidence >= 10:
@@ -1082,13 +1384,70 @@ def _candidate_card(idx: int, c: dict[str, Any]) -> str:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _score_tier(score: float) -> tuple[str, str]:
-    """Return (ring_class, bar_class) for a 0-100 overall or 0-10 dimension."""
-    if score >= 80:
+def _filter_reason(candidate: dict[str, Any]) -> str | None:
+    """Return a reason string if this candidate should be filtered from the report.
+
+    Last-line-of-defense filtering to hide garbage that somehow made it
+    through the pipeline.  The real fix is upstream (agent + validation),
+    but this prevents embarrassing reports.
+    """
+    name = (candidate.get("name") or "").strip()
+
+    # Placeholder / enrichment marker
+    if name.startswith("[") and "NEEDS" in name:
+        return "placeholder name — source returned unenriched web page"
+
+    # Article title markers
+    if any(c in name for c in ":：") and len(name) > 15:
+        return "article title (contains colon / long text)"
+    if any(c in name for c in "《》「」"):
+        return "article title (contains Chinese quote marks)"
+
+    # Job posting markers
+    if any(kw in name for kw in ("招聘", "实习", "职位", "年薪", "待遇", "薪资")):
+        return "job posting content"
+
+    # Numeric ID
+    import re as _re
+    if _re.match(r"^\d+$", name) or _re.match(r"^\d{4,}_\d+", name):
+        return "numeric ID, not a person name"
+
+    # All lowercase (probably a username without real name)
+    alpha = [c for c in name if c.isalpha()]
+    if alpha and all(c.islower() for c in alpha) and len(name) <= 10:
+        return "all-lowercase username without real name"
+
+    # Zero signal candidates (no evidence, no score, no external IDs)
+    ev = candidate.get("evidence_count", 0)
+    score = candidate.get("overall_score") or 0
+    ext = candidate.get("external_ids") or {}
+    has_ext = any(ext.values())
+    if ev == 0 and score == 0 and not has_ext and not candidate.get("institution"):
+        return "zero evidence, zero score, no identifiers"
+
+    return None
+
+
+def _score_tier(score: float, role_type: str = "default") -> tuple[str, str]:
+    """Return (ring_class, bar_class) for a 0-100 overall or 0-10 dimension.
+
+    Uses role-type-calibrated thresholds.
+    """
+    thresholds = {
+        "research_scientist": {"excellent": 80, "good": 65, "fair": 50},
+        "engineer": {"excellent": 82, "good": 68, "fair": 52},
+        "ml_engineer": {"excellent": 82, "good": 68, "fair": 52},
+        "tech_lead": {"excellent": 80, "good": 65, "fair": 50},
+        "product_manager": {"excellent": 78, "good": 62, "fair": 48},
+        "data_scientist": {"excellent": 80, "good": 65, "fair": 50},
+        "default": {"excellent": 80, "good": 65, "fair": 50},
+    }
+    t = thresholds.get(role_type, thresholds["default"])
+    if score >= t["excellent"]:
         return ("score-good", "bar-good")
-    elif score >= 50:
+    elif score >= t["good"]:
         return ("score-warn", "bar-warn")
-    elif score >= 30:
+    elif score >= t["fair"]:
         return ("score-caution", "bar-caution")
     else:
         return ("score-bad", "bar-bad")

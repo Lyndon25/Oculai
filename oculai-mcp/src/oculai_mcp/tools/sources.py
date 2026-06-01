@@ -60,6 +60,9 @@ async def search_source(
                     "h_index": c.h_index, "citation_count": c.citation_count,
                     "research_areas": c.research_areas, "profile_url": c.profile_url,
                     "raw_metadata": c.raw_metadata,
+                    "result_type": c.result_type,
+                    "confidence": c.confidence,
+                    "extraction_method": c.extraction_method,
                 }
                 for c in candidates
             ],
@@ -99,6 +102,9 @@ async def fetch_source_detail(source_name: str, external_id: str) -> dict[str, A
                 "citation_count": candidate.citation_count,
                 "research_areas": candidate.research_areas, "profile_url": candidate.profile_url,
                 "raw_metadata": candidate.raw_metadata,
+                "result_type": candidate.result_type,
+                "confidence": candidate.confidence,
+                "extraction_method": candidate.extraction_method,
             },
         }
     except Exception as e:

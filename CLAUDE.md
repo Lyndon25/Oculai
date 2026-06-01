@@ -19,10 +19,11 @@ PostgreSQL 16 + pgvector (single source of truth)
 ```
 
 - Main Agent reads `oculai/skills/oculai-talent-sourcing/SKILL.md` for the orchestration protocol
-- 7 subagents in `oculai/agents/` are Markdown prompts, not Python classes
+- 8 subagents in `oculai/agents/` are Markdown prompts, not Python classes; Query Optimizer handles iterative search refinement
 - 5 slash commands in `oculai/commands/` activate the skill
 - Workflows are DAG-based: Plan → Task (free-form TEXT type) → TaskDependency
 - Concurrent task claiming uses PostgreSQL `FOR UPDATE SKIP LOCKED`
+- ReAct iteration logs and cross-agent discovery broadcasts are persisted for auditability and resume
 
 ## Common Commands
 
@@ -43,8 +44,14 @@ cd oculai-db && docker compose down -v && docker compose up -d
 
 ### MCP Server
 ```bash
-# Install dependencies
+# Install core dependencies
 cd oculai-mcp && pip install -e .
+
+# Install development dependencies from pyproject.toml
+cd oculai-mcp && pip install -e ".[dev]"
+
+# Optional source/browser extras
+cd oculai-mcp && pip install -e ".[playwright,baidu]" && python -m playwright install chromium
 
 # Run via fastmcp (for Claude Code integration)
 cd oculai-mcp && fastmcp run src/oculai_mcp/server.py
@@ -53,11 +60,8 @@ cd oculai-mcp && fastmcp run src/oculai_mcp/server.py
 cd oculai-mcp && fastmcp dev src/oculai_mcp/server.py
 ```
 
-### Tests
+### Tests / Checks
 ```bash
-# Run the integration test (requires running PostgreSQL)
-cd oculai-mcp && python tests/integration_test.py
-
 # Compile-check all Python modules (no DB needed)
 cd oculai-mcp && python -c "
 import py_compile
@@ -66,7 +70,12 @@ for f in Path('src/oculai_mcp').rglob('*.py'):
     py_compile.compile(str(f), doraise=True)
 print('OK')
 "
+
+# Run the MCP DB integration smoke test (requires running PostgreSQL)
+cd oculai-mcp && python tests/integration_test.py
 ```
+
+No pytest test cases are currently committed. Product acceptance testing is through full Oculai pipeline runs saved under `temp/test/<NNN>-<slug>/`.
 
 ## Environment
 
@@ -85,6 +94,8 @@ The `db/client.py` registers codecs for JSON/JSONB columns. **Never call `json.d
 
 ### Tool registration pattern
 All MCP tools are `@mcp.tool` decorated async functions in `server.py`. Each tool converts `str` → `UUID`, delegates to a `tools/` or `db/` module, and returns `dict[str, Any]`. Tool names are prefixed `oculai_`.
+
+Current tool groups include run lifecycle, planning/tasks, ReAct iterations, cross-agent broadcasts, source search/detail, deep search/progress, candidates/batch upsert, evidence/evidence tiers, assessment/score history, review sessions, reports, web search, outreach, approvals, and browser evidence.
 
 To add a new tool:
 1. Implement the logic in `src/oculai_mcp/tools/` or `src/oculai_mcp/db/`
@@ -108,7 +119,7 @@ Sources auto-register in `sources/registry.py` on import. Adding a new source re
 
 | Source | Key Required | Notes |
 |---|---|---|
-| arxiv, dblp, openalex, conference | None | Always available |
+| arxiv, dblp, openalex, conference, acl_anthology, pmlr | None | Always available academic/publication sources |
 | github | `GITHUB_TOKEN` | 60 req/h without, 5000 req/h with |
 | semantic_scholar | `SEMANTIC_SCHOLAR_API_KEY` | Optional, increases rate limit |
 | baidu_qianfan | `BAIDU_API_KEY` | Official Qianfan AI Search API, 100 calls/day free |
@@ -140,14 +151,14 @@ When upserting a candidate (`candidates.py`), the system runs a 3-step resolutio
 If no match, a new Person is created. Conflicting non-NULL values during merge trigger `DataConflict` records.
 
 ### Assessment dimensions
-Valid assessment dimensions are domain-constrained: `academic`, `engineering`, `leadership`, `communication`, `culture_fit`, `skill_match`, `location`, `career_stage`, `mobility`, `overall`.
+Valid assessment dimensions are domain-constrained: `academic`, `engineering`, `leadership`, `communication`, `culture_fit`, `skill_match`, `location`, `career_stage`, `mobility`, `overall`. The assessment engine computes confidence-weighted overall scores using role-type weights from `tools/assessment_weights.py`; must-pass gate failures cap the overall score.
 
 ### Human approval gate
 All external actions (outreach, data export) must pass through `request_human_approval`. The system **never sends messages autonomously**. Outreach drafts are created with `create_outreach_draft` and blocked until a human approves via the database.
 
 ## Testing Specification
 
-The project is tested exclusively through **end-to-end full-pipeline runs**. There are no unit tests or integration tests — every test is a complete sourcing run through the skill pipeline.
+The project's primary acceptance testing is through **end-to-end full-pipeline runs**. The Python `tests/integration_test.py` script is an MCP/database smoke test, not a substitute for a complete sourcing run through the skill pipeline.
 
 ### Test Directory Structure
 
@@ -191,16 +202,18 @@ Run the complete pipeline as defined in `oculai/skills/oculai-talent-sourcing/SK
 1. oculai_create_run
 2. oculai_list_source_capabilities
 3. Launch Search Strategist subagent
-4. oculai_checkpoint_plan
-5. Launch Source Researchers (parallel)
-6. oculai_upsert_candidate (per candidate)
-7. Launch Identity Resolver
-8. Launch Profile Enricher
-9. Launch Fit Evaluator
-10. Launch Quality Auditor
-11. oculai_export_report (format=html)
-12. (optional) Launch Outreach Strategist
-13. Present results
+4. oculai_checkpoint_plan (persists the Plan + Task DAG)
+5. Launch Source Researchers in parallel with iterative think-search
+6. Record iterations and terminology discoveries via oculai_record_iteration / oculai_broadcast_discovery
+7. Launch Query Optimizer when results are noisy, skewed, or sparse
+8. oculai_upsert_candidate or oculai_upsert_candidates_batch
+9. Launch Identity Resolver
+10. Launch Profile Enrichers
+11. Launch Fit Evaluators
+12. Launch Quality Auditor and apply any approved audit adjustments
+13. oculai_export_report (format=html)
+14. (optional) Launch Outreach Strategist and request human approval
+15. Present results
 ```
 
 **3. Save all deliverables**
@@ -237,12 +250,12 @@ Before starting a test run:
 | Directory | Purpose |
 |---|---|
 | `oculai/skills/` | Claude Code skill definition (trigger, protocol, references) |
-| `oculai/agents/` | 7 subagent Markdown prompt files |
+| `oculai/agents/` | 8 subagent Markdown prompt files |
 | `oculai/commands/` | 5 slash command definitions |
 | `oculai-db/` | Docker Compose, PostgreSQL config, SQL schema migrations |
 | `oculai-mcp/src/oculai_mcp/` | Python MCP server source |
-| `oculai-mcp/src/oculai_mcp/db/` | Database access layer (asyncpg, CRUD, retry logic) |
-| `oculai-mcp/src/oculai_mcp/tools/` | Domain tool implementations (candidates, evidence, assessment, etc.) |
-| `oculai-mcp/src/oculai_mcp/sources/` | Source connectors (arXiv, DBLP, GitHub, Semantic Scholar, OpenAlex, Baidu scrapers, Baidu Qianfan, homepage, Juejin, Zhihu, CSDN) |
+| `oculai-mcp/src/oculai_mcp/db/` | Database access layer (asyncpg, CRUD, retry logic, task iterations, broadcasts, search state) |
+| `oculai-mcp/src/oculai_mcp/tools/` | Domain tool implementations (sources, candidates, evidence, assessment, deep search, review, report, outreach) |
+| `oculai-mcp/src/oculai_mcp/sources/` | Source connectors (arXiv, DBLP, GitHub, Semantic Scholar, OpenAlex, ACL Anthology, PMLR, Baidu, homepage, Juejin, Zhihu, CSDN) |
 | `oculai-mcp/src/oculai_mcp/tools/web_search.py` | Tavily/Exa web search MCP tool (separate from source connectors) |
-| `oculai-mcp/tests/` | Integration tests |
+| `oculai-mcp/tests/` | MCP/database smoke test script |

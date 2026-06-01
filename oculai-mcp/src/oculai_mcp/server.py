@@ -10,8 +10,11 @@ from fastmcp import FastMCP
 
 from oculai_mcp.config import get_settings
 from oculai_mcp.db import runs, tasks
+from oculai_mcp.db import iterations as iteration_db
+from oculai_mcp.db import broadcasts as broadcast_db
 from oculai_mcp.tools import candidates, evidence, assessment, sources, report
-from oculai_mcp.tools import web_search, outreach, browser
+from oculai_mcp.tools import web_search, outreach, browser, deep_search as deep_search_tool
+from oculai_mcp.tools import review_orchestrator as review
 
 mcp = FastMCP(
     "Oculai Talent Sourcing",
@@ -245,6 +248,149 @@ async def oculai_fail_task(
 
 
 # ============================================================
+# M1 bonus: Iteration recording and retrieval (ReAct audit)
+# ============================================================
+
+@mcp.tool
+async def oculai_record_iteration(
+    task_id: str,
+    iteration_number: int,
+    iteration_type: str,
+    reasoning_text: str | None = None,
+    action_taken: str | None = None,
+    action_params: dict[str, Any] | None = None,
+    observation_text: str | None = None,
+    observation_data: dict[str, Any] | None = None,
+    decision: str | None = None,
+    decision_rationale: str | None = None,
+) -> dict[str, Any]:
+    """Persist one step of an agent's reasoning loop to the database.
+
+    Subagents call this after EVERY ReAct step (THINK, SEARCH, OBSERVE,
+    CLASSIFY, DETAIL, ADJUST, STOP, etc.) to create an auditable trace.
+    The main agent can later retrieve these iterations via
+    oculai_get_task_iterations to inspect reasoning and detect issues.
+
+    Args:
+        task_id: The Task UUID this iteration belongs to
+        iteration_number: Auto-incrementing step number within the task
+        iteration_type: think | search | observe | classify | detail | adjust | stop | gather | assess | reprioritize | initialize
+        reasoning_text: Pre-action reasoning (for THINK steps)
+        action_taken: Tool/action name (for SEARCH, DETAIL steps)
+        action_params: JSON parameters passed to the action
+        observation_text: Post-action analysis (for OBSERVE steps)
+        observation_data: Structured observation metadata
+        decision: High-level decision (NARROW, PIVOT, DEEPEN, STOP, etc.)
+        decision_rationale: Why this decision was made
+    """
+    from uuid import UUID
+
+    iteration_id = await iteration_db.record_iteration(
+        task_id=UUID(task_id),
+        iteration_number=iteration_number,
+        iteration_type=iteration_type,
+        reasoning_text=reasoning_text,
+        action_taken=action_taken,
+        action_params=action_params or {},
+        observation_text=observation_text,
+        observation_data=observation_data or {},
+        decision=decision,
+        decision_rationale=decision_rationale,
+    )
+    return {
+        "iteration_id": str(iteration_id),
+        "task_id": task_id,
+        "iteration_number": iteration_number,
+        "iteration_type": iteration_type,
+    }
+
+
+@mcp.tool
+async def oculai_get_task_iterations(
+    task_id: str,
+) -> dict[str, Any]:
+    """Get all recorded iterations for a task, ordered by step number.
+
+    The main agent uses this to inspect a subagent's reasoning chain,
+    detect premature stops, excessive pivots, stuck loops, and
+    confidence degradation.
+
+    Args:
+        task_id: The task UUID
+    """
+    from uuid import UUID
+
+    iterations = await iteration_db.get_task_iterations(UUID(task_id))
+    return {
+        "task_id": task_id,
+        "count": len(iterations),
+        "iterations": iterations,
+    }
+
+
+@mcp.tool
+async def oculai_broadcast_discovery(
+    run_id: str,
+    discovery_type: str,
+    content: str,
+    discovered_by_agent: str,
+) -> dict[str, Any]:
+    """Broadcast a discovery to all parallel agents in this run.
+
+    Use this to share terminology discoveries, population insights,
+    or source quality observations across concurrently running agents.
+
+    Args:
+        run_id: The SourcingRun UUID
+        discovery_type: terminology | population_insight | source_quality
+        content: The discovery text
+        discovered_by_agent: Agent identifier (e.g., "source-researcher-juejin")
+    """
+    from uuid import UUID
+
+    broadcast_id = await broadcast_db.broadcast_discovery(
+        run_id=UUID(run_id),
+        discovery_type=discovery_type,
+        content=content,
+        discovered_by=discovered_by_agent,
+    )
+    return {
+        "broadcast_id": str(broadcast_id),
+        "run_id": run_id,
+        "discovery_type": discovery_type,
+        "content": content,
+    }
+
+
+@mcp.tool
+async def oculai_get_broadcasts(
+    run_id: str,
+    agent_id: str,
+) -> dict[str, Any]:
+    """Get all unconsumed broadcasts from other agents in this run.
+
+    Automatically marks returned broadcasts as consumed by the requesting
+    agent to prevent duplicate processing.
+
+    Args:
+        run_id: The SourcingRun UUID
+        agent_id: The requesting agent's identifier
+    """
+    from uuid import UUID
+
+    broadcasts = await broadcast_db.get_broadcasts(
+        run_id=UUID(run_id),
+        agent_id=agent_id,
+    )
+    return {
+        "run_id": run_id,
+        "agent_id": agent_id,
+        "count": len(broadcasts),
+        "broadcasts": broadcasts,
+    }
+
+
+# ============================================================
 # M2: Source tools
 # ============================================================
 
@@ -293,6 +439,42 @@ async def oculai_search_source(
 
 
 @mcp.tool
+async def oculai_deep_search(
+    run_id: str,
+    hypotheses: list[dict[str, Any]],
+    config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Execute deep iterative search across hypotheses and sources.
+
+    Manages the full search loop: signal probe → budget allocation →
+    deep iteration → gap detection → gap fill → termination.
+    Stops when sources saturate, budget exhausts, or time limit reached.
+
+    Args:
+        run_id: The run UUID
+        hypotheses: Search hypotheses from Search Strategist
+        config: Optional overrides for depth limits, budgets, thresholds
+    """
+    from uuid import UUID
+    return await deep_search_tool.deep_search(
+        run_id=UUID(run_id),
+        hypotheses=hypotheses,
+        config=config,
+    )
+
+
+@mcp.tool
+async def oculai_get_search_progress(run_id: str) -> dict[str, Any]:
+    """Get current deep search progress for a run.
+
+    Returns per-source stats: rounds executed, results found,
+    signal quality, saturation status, and overall progress.
+    """
+    from uuid import UUID
+    return await deep_search_tool.get_search_progress(UUID(run_id))
+
+
+@mcp.tool
 async def oculai_fetch_source_detail(
     source_name: str,
     external_id: str,
@@ -336,6 +518,34 @@ async def oculai_upsert_candidate(
     return await candidates.upsert_candidate(
         run_id=UUID(run_id),
         person_data=person_data,
+        source_name=source_name,
+        agent_id=agent_id,
+    )
+
+
+@mcp.tool
+async def oculai_upsert_candidates_batch(
+    run_id: str,
+    candidates_list: list[dict[str, Any]],
+    source_name: str = "unknown",
+    agent_id: str = "system",
+) -> dict[str, Any]:
+    """Batch upsert multiple candidates in a single DB transaction.
+
+    Much faster than individual oculai_upsert_candidate calls because it
+    eliminates per-candidate connection-pool overhead.  Still runs full
+    validation and identity resolution for each candidate.
+
+    Args:
+        run_id: The run UUID
+        candidates_list: List of person_data dicts (same shape as oculai_upsert_candidate)
+        source_name: Which source these candidates came from
+        agent_id: Identifier for the agent doing the upsert
+    """
+    from uuid import UUID
+    return await candidates.upsert_candidates_batch(
+        run_id=UUID(run_id),
+        candidates_list=candidates_list,
         source_name=source_name,
         agent_id=agent_id,
     )
@@ -494,12 +704,14 @@ async def oculai_score_candidate(
     evidence_ids: list[str] | None = None,
     confidence: float = 1.0,
     rationale: str = "",
+    role_type: str = "default",
 ) -> dict[str, Any]:
     """Score a candidate across multiple dimensions simultaneously.
 
     Each dimension is scored 0.0-10.0. Uses upsert (ON CONFLICT DO UPDATE)
     so repeated scoring by the same agent for the same dimension is idempotent.
-    Computes overall score as AVG across dimensions.
+    Computes overall score with role-type weights, confidence weighting,
+    and must-pass gate enforcement.
 
     Args:
         run_id: The run UUID
@@ -509,6 +721,7 @@ async def oculai_score_candidate(
         evidence_ids: UUIDs of evidence records supporting the scores
         confidence: Overall assessment confidence (0.0-1.0)
         rationale: Free-text rationale
+        role_type: Role type for weight calibration (research_scientist, engineer, tech_lead, ml_engineer, product_manager, data_scientist, default)
     """
     from uuid import UUID
     return await assessment.score_candidate(
@@ -519,6 +732,7 @@ async def oculai_score_candidate(
         evidence_ids=evidence_ids,
         confidence=confidence,
         rationale=rationale,
+        role_type=role_type,
     )
 
 
@@ -532,6 +746,7 @@ async def oculai_record_assessment(
     confidence: float = 1.0,
     rationale: str = "",
     evidence_ids: list[str] | None = None,
+    role_type: str = "default",
 ) -> dict[str, Any]:
     """Record a single dimension assessment for a candidate.
 
@@ -544,6 +759,7 @@ async def oculai_record_assessment(
         confidence: Assessment confidence (0.0-1.0)
         rationale: Free-text rationale
         evidence_ids: UUIDs of evidence records supporting this score
+        role_type: Role type for weight calibration
     """
     from uuid import UUID
     return await assessment.record_assessment(
@@ -555,6 +771,7 @@ async def oculai_record_assessment(
         confidence=confidence,
         rationale=rationale,
         evidence_ids=evidence_ids,
+        role_type=role_type,
     )
 
 
@@ -581,9 +798,175 @@ async def oculai_get_shortlist(
     )
 
 
+@mcp.tool
+async def oculai_get_score_history(
+    run_id: str,
+    person_id: str | None = None,
+    dimension: str | None = None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """Get score change history for auditing.
+
+    Tracks every time a dimension score was updated, including previous/new
+    values, confidence, and the agent that made the change.
+
+    Args:
+        run_id: The run UUID
+        person_id: Optional person UUID to filter by
+        dimension: Optional dimension name to filter by
+        limit: Max history entries to return
+    """
+    from uuid import UUID
+    return await assessment.get_score_history(
+        run_id=UUID(run_id),
+        person_id=UUID(person_id) if person_id else None,
+        dimension=dimension,
+        limit=limit,
+    )
+
+
+@mcp.tool
+async def oculai_get_evidence_by_tier(
+    run_id: str,
+    person_id: str,
+    max_tier: int = 2,
+) -> dict[str, Any]:
+    """Get evidence up to a given quality tier.
+
+    Tier 1 = primary (publication, repo contribution, CV)
+    Tier 2 = secondary (profile, blog post)
+    Tier 3 = indirect (comment, starred repo)
+    Tier 4 = inferred
+
+    Useful for validating that high scores have supporting Tier 1 evidence.
+
+    Args:
+        run_id: The run UUID
+        person_id: Internal Person UUID
+        max_tier: Maximum tier to include (default 2 = primary + secondary)
+    """
+    from uuid import UUID
+    return await evidence.get_evidence_by_tier(
+        run_id=UUID(run_id),
+        person_id=UUID(person_id),
+        max_tier=max_tier,
+    )
+
+
 # ============================================================
 # M2: Report tools
 # ============================================================
+
+# ============================================================
+# M3: Review Orchestrator tools
+# ============================================================
+
+@mcp.tool
+async def oculai_create_review_session(
+    run_id: str,
+    role_type: str = "default",
+    candidate_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Create a multi-pass review session for a run's candidate pool.
+
+    The review pipeline runs: enrichment → initial_scoring → audit → adjustment → complete.
+    The main Agent checks progress via oculai_get_review_progress and decides
+    when to launch Profile Enricher / Fit Evaluator / Quality Auditor subagents.
+
+    Args:
+        run_id: The run UUID
+        role_type: Role type for weight calibration (research_scientist, engineer, tech_lead, ml_engineer, product_manager, data_scientist, default)
+        candidate_ids: Optional list of person UUIDs to review. If None, all candidates in the run are included.
+    """
+    from uuid import UUID
+    parsed_ids = [UUID(c) for c in candidate_ids] if candidate_ids else None
+    return await review.create_review_session(
+        run_id=UUID(run_id),
+        role_type=role_type,
+        candidate_ids=parsed_ids,
+    )
+
+
+@mcp.tool
+async def oculai_execute_review_pass(
+    session_id: str,
+    pass_type: str,
+    completed_candidate_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Advance a review session to the next pass.
+
+    Call this after subagents have finished processing candidates in the
+    current pass. If all candidates are done, the session auto-advances
+    to the next pass.
+
+    Args:
+        session_id: Review session UUID
+        pass_type: Current pass (enrichment, initial_scoring, audit, adjustment, complete)
+        completed_candidate_ids: Candidates that finished this pass
+    """
+    from uuid import UUID
+    parsed_ids = [UUID(c) for c in completed_candidate_ids] if completed_candidate_ids else None
+    return await review.execute_review_pass(
+        session_id=UUID(session_id),
+        pass_type=pass_type,
+        completed_candidate_ids=parsed_ids,
+    )
+
+
+@mcp.tool
+async def oculai_get_review_progress(session_id: str) -> dict[str, Any]:
+    """Get current review session progress.
+
+    Returns: current pass, pending/completed/failed counts, per-candidate status,
+    audit findings, and pass timings.
+
+    Args:
+        session_id: Review session UUID
+    """
+    from uuid import UUID
+    return await review.get_review_progress(UUID(session_id))
+
+
+@mcp.tool
+async def oculai_apply_audit_adjustments(
+    session_id: str,
+    adjustments: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Apply auditor-recommended score adjustments with history tracking.
+
+    Each adjustment dict must contain:
+    - person_id: Person UUID
+    - dimension: Dimension name
+    - new_score: New score 0.0-10.0
+    - reason: Why the adjustment was made
+    - assessor_agent: "quality_auditor" or similar
+    - confidence: Optional confidence (default 0.9)
+    - evidence_ids: Optional supporting evidence UUIDs
+
+    Args:
+        session_id: Review session UUID
+        adjustments: List of adjustment dicts
+    """
+    from uuid import UUID
+    return await review.apply_audit_adjustments(
+        session_id=UUID(session_id),
+        adjustments=adjustments,
+    )
+
+
+@mcp.tool
+async def oculai_finalize_review_session(session_id: str) -> dict[str, Any]:
+    """Mark a review session as complete and compute final rankings.
+
+    Returns aggregate statistics: total candidates, score distribution,
+    dimension averages.
+
+    Args:
+        session_id: Review session UUID
+    """
+    from uuid import UUID
+    return await review.finalize_review_session(UUID(session_id))
+
 
 @mcp.tool
 async def oculai_export_report(

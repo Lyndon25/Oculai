@@ -198,40 +198,28 @@ class GitHubAPISource(IDataSource):
         contributor_infos: list[dict[str, Any]],
         max_candidates: int,
     ) -> list[RawCandidate]:
-        """Fetch user details in small parallel batches."""
+        """Fetch user details in small parallel batches.
+
+        Always calls get_detail() for each contributor so that real names,
+        company, bio, and location are populated. Falls back to login when
+        the real name is unavailable.
+        """
 
         async def _fetch_one(info: dict[str, Any]) -> RawCandidate | None:
-            try:
-                resp = await client.get(f"/users/{info['login']}")
-                resp.raise_for_status()
-                data = resp.json()
-            except Exception:
+            detail = await self.get_detail(info["login"])
+            if detail is None:
                 return None
 
-            name = data.get("name") or data.get("login") or info["login"]
-            company = data.get("company")
-            if company:
-                company = company.strip().lstrip("@")
-
-            return RawCandidate(
-                name=name,
-                github_id=data.get("login"),
-                institution=company,
-                profile_url=data.get("html_url"),
-                raw_metadata={
-                    "source": "github_api",
-                    "bio": data.get("bio"),
-                    "location": data.get("location"),
-                    "public_repos": data.get("public_repos", 0),
-                    "followers": data.get("followers", 0),
-                    "following": data.get("following", 0),
-                    "hireable": data.get("hireable"),
-                    "top_repo": info["repo_name"],
-                    "top_repo_stars": info["repo_stars"],
-                    "contributions_to_top_repo": info["contributions"],
-                    "top_repo_language": info["repo_language"],
-                },
-            )
+            # Merge contributor-specific repo metadata into the detail record
+            raw_meta = detail.raw_metadata or {}
+            raw_meta.update({
+                "top_repo": info["repo_name"],
+                "top_repo_stars": info["repo_stars"],
+                "contributions_to_top_repo": info["contributions"],
+                "top_repo_language": info["repo_language"],
+            })
+            detail.raw_metadata = raw_meta
+            return detail
 
         batch_size = 10
         results: list[RawCandidate] = []
@@ -252,7 +240,12 @@ class GitHubAPISource(IDataSource):
     async def _search_users_fallback(
         self, client: httpx.AsyncClient, query: SearchQuery
     ) -> list[RawCandidate]:
-        """Fallback: search users directly with basic query."""
+        """Fallback: search users directly with basic query.
+
+        Calls get_detail() for each result so that real names, company, bio,
+        and location are populated. Falls back to login when the real name is
+        unavailable.
+        """
         keywords = " ".join(query.keywords)
         params = {
             "q": keywords,
@@ -264,19 +257,34 @@ class GitHubAPISource(IDataSource):
 
         candidates: list[RawCandidate] = []
         for item in data.get("items", [])[: query.limit]:
-            candidates.append(
-                RawCandidate(
-                    name=item.get("login", "Unknown"),
-                    github_id=item.get("login"),
-                    profile_url=item.get("html_url"),
-                    raw_metadata={
-                        "source": "github_api",
-                        "avatar_url": item.get("avatar_url"),
-                        "type": item.get("type"),
-                        "fallback_search": True,
-                    },
+            login = item.get("login")
+            if not login:
+                continue
+
+            detail = await self.get_detail(login)
+            if detail is not None:
+                raw_meta = detail.raw_metadata or {}
+                raw_meta["fallback_search"] = True
+                detail.raw_metadata = raw_meta
+                candidates.append(detail)
+            else:
+                # Graceful degradation if detail fetch fails
+                candidates.append(
+                    RawCandidate(
+                        name=login,
+                        github_id=login,
+                        profile_url=item.get("html_url"),
+                        raw_metadata={
+                            "source": "github_api",
+                            "avatar_url": item.get("avatar_url"),
+                            "type": item.get("type"),
+                            "fallback_search": True,
+                        },
+                        result_type="profile_page",
+                        confidence="high",
+                        extraction_method="fallback",
+                    )
                 )
-            )
         return candidates
 
     async def _log_search(
@@ -336,7 +344,8 @@ class GitHubAPISource(IDataSource):
                 records_count=1,
             )
 
-            name = data.get("name") or data.get("login") or login
+            real_name = data.get("name")
+            name = real_name if real_name else (data.get("login") or login)
             company = data.get("company")
             if company:
                 company = company.strip().lstrip("@")
@@ -356,6 +365,9 @@ class GitHubAPISource(IDataSource):
                     "created_at": data.get("created_at"),
                     "hireable": data.get("hireable"),
                 },
+                result_type="profile_page",
+                confidence="high",
+                extraction_method="direct",
             )
 
         except httpx.HTTPStatusError as e:

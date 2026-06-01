@@ -159,9 +159,19 @@ class BaiduScholarSource(IDataSource):
                 journal = item.get("journal") or item.get("publication", "")
                 url = item.get("url") or item.get("paper_url", "")
 
+                # Never fall back to paper title as a person's name.
+                if authors:
+                    name = str(authors)
+                    confidence = "high"
+                    extraction_method = "direct"
+                else:
+                    name = "Unknown"
+                    confidence = "low"
+                    extraction_method = "unverified"
+
                 candidates.append(
                     RawCandidate(
-                        name=str(authors) if authors else title[:200],
+                        name=name,
                         institution=journal,
                         research_areas=[abstract[:500]] if abstract else None,
                         profile_url=url or None,
@@ -175,6 +185,9 @@ class BaiduScholarSource(IDataSource):
                             "journal": journal,
                             "url": url,
                         },
+                        result_type="paper",
+                        confidence=confidence,
+                        extraction_method=extraction_method,
                     )
                 )
 
@@ -233,15 +246,28 @@ class BaiduScholarSource(IDataSource):
             items = data.get("results", data.get("data", []))
             if items:
                 item = items[0]
+                authors = item.get("authors")
+                title = item.get("title", "")
+                if authors:
+                    name = authors
+                    confidence = "high"
+                    extraction_method = "direct"
+                else:
+                    name = "Unknown"
+                    confidence = "low"
+                    extraction_method = "unverified"
                 return RawCandidate(
-                    name=item.get("authors") or item.get("title", ""),
+                    name=name,
                     profile_url=item.get("url"),
                     raw_metadata={
                         "source": "baidu_scholar",
                         "paper_id": external_id,
-                        "title": item.get("title"),
+                        "title": title,
                         "abstract": item.get("abstract"),
                     },
+                    result_type="paper",
+                    confidence=confidence,
+                    extraction_method=extraction_method,
                 )
             return None
         except Exception:
@@ -379,6 +405,9 @@ class BaiduSearchSource(IDataSource):
                             "snippet": snippet,
                             "url": url,
                         },
+                        result_type="web_page",
+                        confidence="low",
+                        extraction_method="unverified",
                     )
                 )
 

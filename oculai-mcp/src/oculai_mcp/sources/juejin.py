@@ -113,10 +113,19 @@ class JuejinSource(IDataSource):
                     continue
                 seen_user_ids.add(user_id)
 
-                user_name = user_info.get("user_name", "") or ""
-                job_title = user_info.get("job_title", "") or user_info.get("position", "") or ""
-                company = user_info.get("company", "") or ""
-                description = user_info.get("description", "") or ""
+                # Fetch author details to get accurate company/job_title
+                author_detail = await self._fetch_author_detail(user_id)
+                if author_detail:
+                    user_name = author_detail.get("user_name", "") or user_info.get("user_name", "") or ""
+                    job_title = author_detail.get("position", "") or user_info.get("job_title", "") or user_info.get("position", "") or ""
+                    company = author_detail.get("company", "") or user_info.get("company", "") or ""
+                    description = author_detail.get("description", "") or user_info.get("description", "") or ""
+                else:
+                    user_name = user_info.get("user_name", "") or ""
+                    job_title = user_info.get("job_title", "") or user_info.get("position", "") or ""
+                    company = user_info.get("company", "") or ""
+                    description = user_info.get("description", "") or ""
+
                 short_intro = f"{job_title} @ {company}" if job_title and company else (job_title or company or "")
 
                 candidates.append(
@@ -138,6 +147,9 @@ class JuejinSource(IDataSource):
                             "digg_count": user_info.get("got_digg_count", 0) or user_info.get("digg_count", 0),
                             "article_title": result_model.get("article_info", {}).get("title", ""),
                         },
+                        result_type="profile_page",
+                        confidence="medium",
+                        extraction_method="direct",
                     )
                 )
 
@@ -177,6 +189,29 @@ class JuejinSource(IDataSource):
             logger.exception("Juejin search failed")
 
         return candidates
+
+    async def _fetch_author_detail(self, user_id: str) -> dict[str, Any] | None:
+        """Fetch Juejin user details by user_id (internal helper for search)."""
+        try:
+            client = await self._get_client()
+            resp = await client.get(
+                JUJUE_USER_URL,
+                params={"user_id": user_id},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            user = data.get("data", {})
+            if not user:
+                return None
+            return {
+                "user_name": user.get("user_name", ""),
+                "position": user.get("position", ""),
+                "company": user.get("company", ""),
+                "description": user.get("description", ""),
+            }
+        except Exception:
+            logger.debug("Juejin _fetch_author_detail failed for %s", user_id)
+            return None
 
     async def get_detail(self, external_id: str) -> RawCandidate | None:
         """Fetch detailed Juejin user profile by user_id."""
@@ -232,6 +267,9 @@ class JuejinSource(IDataSource):
                     "tags": user.get("tags", []),
                     "skill_tags": [t.get("tag_name", "") for t in (user.get("tags") or []) if t],
                 },
+                result_type="profile_page",
+                confidence="medium",
+                extraction_method="direct",
             )
 
         except Exception:

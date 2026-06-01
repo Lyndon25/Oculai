@@ -128,31 +128,7 @@ class BaiduQianfanSource(IDataSource):
 
             results = self._extract_results(data)
             for r in results[: query.limit]:
-                title = r.get("title", "") or ""
-                url = r.get("url", "") or ""
-                snippet = r.get("snippet") or r.get("content", "") or ""
-                website = r.get("website", "")
-                date = r.get("date", "")
-                rerank_score = r.get("rerank_score", 0)
-                authority_score = r.get("authority_score", 0)
-
-                candidates.append(
-                    RawCandidate(
-                        name=title[:200] if title else "Unknown",
-                        profile_url=url or None,
-                        raw_metadata={
-                            "source": "baidu_qianfan",
-                            "title": title,
-                            "snippet": snippet,
-                            "url": url,
-                            "website": website,
-                            "date": date,
-                            "rerank_score": rerank_score,
-                            "authority_score": authority_score,
-                            "type": r.get("type", "web"),
-                        },
-                    )
-                )
+                candidates.append(self._classify_and_enrich(r))
 
             await consume_quota(self.name, amount=len(candidates))
             duration_ms = int((time.perf_counter() - start) * 1000)
@@ -191,6 +167,202 @@ class BaiduQianfanSource(IDataSource):
             logger.exception("Qianfan search failed")
 
         return candidates
+
+    def _classify_and_enrich(self, result: dict[str, Any]) -> RawCandidate:
+        """Classify a Baidu search result and build an honest RawCandidate.
+
+        The MCP layer does NOT pretend web pages are people. It returns
+        rich metadata so the Agent can decide what to do with each result.
+
+        Key improvement: for profile_page results, we try to extract a real
+        person name from the title/snippet. For article/web_page results,
+        we preserve the original title in metadata but do NOT claim it is
+        the person's name — we mark it as needing enrichment.
+        """
+        title = (result.get("title", "") or "").strip()
+        url = (result.get("url", "") or "").strip()
+        snippet = (result.get("snippet") or result.get("content", "") or "").strip()
+        website = result.get("website", "")
+        date = result.get("date", "")
+        rerank_score = result.get("rerank_score", 0)
+        authority_score = result.get("authority_score", 0)
+
+        lowered_url = url.lower()
+
+        # --- URL-based classification ---
+        github_id: str | None = None
+        result_type = "web_page"
+        confidence = "low"
+        extraction_method = "unverified"
+        extracted_name = ""
+        extracted_institution = ""
+
+        # GitHub profile pages
+        if "github.com" in lowered_url:
+            parts = url.rstrip("/").split("/")
+            if len(parts) >= 4 and parts[2].lower() == "github.com":
+                user = parts[3]
+                if user and user not in ("search", "topics", "collections", "explore", "marketplace", "trending"):
+                    github_id = user
+                    result_type = "profile_page"
+                    confidence = "medium"  # username is known, real name unknown until get_detail
+                    extraction_method = "inferred"
+                    # Try to extract real name from title: "GitHub - Real Name (username)"
+                    extracted_name = self._extract_github_name(title, snippet) or user
+
+        # Juejin (掘金) profile pages
+        elif "juejin.cn/user" in lowered_url:
+            result_type = "profile_page"
+            confidence = "medium"
+            extraction_method = "direct"
+            extracted_name = self._extract_juejin_name(title, snippet)
+
+        # CSDN blog pages
+        elif "blog.csdn.net" in lowered_url:
+            parts = url.rstrip("/").split("/")
+            if len(parts) >= 4:
+                result_type = "profile_page"
+                confidence = "medium"
+                extraction_method = "direct"
+                extracted_name = self._extract_csdn_name(title, snippet, parts[3])
+
+        # Zhihu people pages
+        elif "zhihu.com/people" in lowered_url:
+            result_type = "profile_page"
+            confidence = "high"
+            extraction_method = "direct"
+            extracted_name = self._extract_zhihu_name(title, snippet)
+
+        # Job / recruiting sites — expanded list
+        elif any(d in lowered_url for d in (
+            "zhipin.com", "lagou.com", "51job.com", "智联招聘",
+            "boss直聘", "拉勾网", "前程无忧", "猎聘", "liepin",
+            "job", "career", "join.us", "hr.", "talent", "recruit",
+        )):
+            result_type = "job_posting"
+            confidence = "low"
+            extraction_method = "unverified"
+
+        # Article-like pages (heuristic)
+        elif any(k in lowered_url for k in (".html", "/article/", "/blog/", "/post/", "/p/")):
+            result_type = "article"
+            confidence = "low"
+            extraction_method = "unverified"
+            # Try to extract author from snippet
+            extracted_name = self._extract_author_from_snippet(snippet)
+
+        # Academic / paper sites
+        elif any(d in lowered_url for d in (
+            "arxiv.org", "dblp.org", "semanticscholar.org",
+            "openalex.org", "scholar.google",
+        )):
+            result_type = "paper"
+            confidence = "medium"
+            extraction_method = "direct"
+
+        # --- Name selection logic ---
+        # Priority: extracted_name > title (for web_page only) > fallback
+        if extracted_name:
+            name = extracted_name
+        elif result_type in ("web_page", "article"):
+            # For web pages and articles, the title is almost certainly NOT a person name.
+            # Use a placeholder that forces the Agent to fetch detail / enrich.
+            name = f"[NEEDS_ENRICH:{title[:80]}]" if title else "[NEEDS_ENRICHMENT]"
+        else:
+            name = title[:200] if title else "Unknown"
+
+        return RawCandidate(
+            name=name,
+            institution=extracted_institution or None,
+            profile_url=url or None,
+            github_id=github_id,
+            raw_metadata={
+                "source": "baidu_qianfan",
+                "original_title": title,
+                "snippet": snippet,
+                "url": url,
+                "website": website,
+                "date": date,
+                "rerank_score": rerank_score,
+                "authority_score": authority_score,
+                "type": result.get("type", "web"),
+                "extracted_name_hint": extracted_name or None,
+                "extracted_institution_hint": extracted_institution or None,
+            },
+            result_type=result_type,
+            confidence=confidence,
+            extraction_method=extraction_method,
+        )
+
+    # ------------------------------------------------------------------
+    # Name extraction helpers — best-effort from search result snippets
+    # ------------------------------------------------------------------
+
+    def _extract_github_name(self, title: str, snippet: str) -> str:
+        """Try to extract real name from GitHub search result.
+
+        GitHub title format: 'UserName (Real Name) · GitHub'
+        or: 'Real Name - GitHub'
+        """
+        import re as _re
+        # Pattern: "username (Real Name) · GitHub"
+        m = _re.search(r"[\(（]([^\)）]{2,30})[\)）]", title)
+        if m:
+            return m.group(1).strip()
+        # Pattern: "Real Name - GitHub" or "Real Name | GitHub"
+        m = _re.search(r"^([^|\-·]{2,30})\s*[|\-·]\s*GitHub", title, _re.I)
+        if m:
+            return m.group(1).strip()
+        return ""
+
+    def _extract_juejin_name(self, title: str, snippet: str) -> str:
+        """Extract user display name from Juejin result.
+
+        Juejin title: 'username - 掘金' or contains user name.
+        """
+        import re as _re
+        m = _re.search(r"^([^|\-·]{2,30})\s*[|\-·]\s*掘金", title)
+        if m:
+            return m.group(1).strip()
+        return ""
+
+    def _extract_csdn_name(self, title: str, snippet: str, username_from_url: str) -> str:
+        """Extract name from CSDN result. Often just the blog username."""
+        import re as _re
+        m = _re.search(r"^([^|\-·]{2,30})\s*[|\-·]\s*CSDN", title, _re.I)
+        if m:
+            return m.group(1).strip()
+        # Fallback to URL username
+        return username_from_url
+
+    def _extract_zhihu_name(self, title: str, snippet: str) -> str:
+        """Extract name from Zhihu people page result.
+
+        Zhihu title: 'username - 知乎'
+        """
+        import re as _re
+        m = _re.search(r"^([^|\-·]{2,30})\s*[|\-·]\s*知乎", title)
+        if m:
+            return m.group(1).strip()
+        return ""
+
+    def _extract_author_from_snippet(self, snippet: str) -> str:
+        """Best-effort author extraction from article snippet.
+
+        Looks for patterns like '作者：张三', 'by John Doe', 'Writer: Alice'.
+        """
+        import re as _re
+        patterns = [
+            r"作者[：:]\s*([^\s，,。．]{2,12})",
+            r"by\s+([A-Z][a-z]+\s+[A-Z][a-z]+)",
+            r"writer[：:]\s*([^\s，,。．]{2,20})",
+            r"文[/／]\s*([^\s，,。．]{2,12})",
+        ]
+        for pat in patterns:
+            m = _re.search(pat, snippet, _re.I)
+            if m:
+                return m.group(1).strip()
+        return ""
 
     def _extract_results(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         """Extract search results from Qianfan API response.

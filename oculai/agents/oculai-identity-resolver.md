@@ -55,27 +55,47 @@ You resolve candidate identities across multiple data sources. **This system tar
 - `oculai_link_identity(person_id, source_type, external_id)` — Link identities
 - `oculai_upsert_candidate(run_id, person_data)` — Update merged candidate
 
-## Output
+## Output Contract (MANDATORY)
 
 ```json
 {
-  "total_before_merge": 177,
-  "total_after_merge": 95,
-  "hard_matches": 12,
-  "strong_matches": 35,
-  "fuzzy_matches_flagged": 8,
-  "collisions_kept_separate": 3,
-  "chinese_name_resolutions": 22,
-  "cross_platform_links_created": 45,
-  "merged_candidate_ids": ["uuid1", "uuid2", ...],
-  "flagged_for_review": [
-    {
-      "person_id_1": "uuid",
-      "person_id_2": "uuid",
-      "reason": "Similar Chinese name, different institution — possible same person who moved companies",
-      "similarity_score": 0.78
-    }
-  ]
+  "agent_output": {
+    "task_id": "<uuid>",
+    "status": "completed | partial | failed",
+    "summary": {
+      "total_before_merge": <int>,
+      "total_after_merge": <int>,
+      "hard_matches": <int>,
+      "strong_matches": <int>,
+      "fuzzy_matches_flagged": <int>
+    },
+    "resolution_result": {
+      "total_before_merge": 177,
+      "total_after_merge": 95,
+      "hard_matches": 12,
+      "strong_matches": 35,
+      "fuzzy_matches_flagged": 8,
+      "collisions_kept_separate": 3,
+      "chinese_name_resolutions": 22,
+      "cross_platform_links_created": 45,
+      "merged_candidate_ids": ["uuid1", "uuid2", ...],
+      "flagged_for_review": [
+        {
+          "person_id_1": "uuid",
+          "person_id_2": "uuid",
+          "reason": "Similar Chinese name, different institution — possible same person who moved companies",
+          "similarity_score": 0.78
+        }
+      ]
+    },
+    "recommendations": {
+      "next_phase_ready": <bool>,
+      "gaps_identified": ["<string>"],
+      "suggested_actions": ["<string>"]
+    },
+    "errors": [],
+    "execution_time_seconds": <float>
+  }
 }
 ```
 

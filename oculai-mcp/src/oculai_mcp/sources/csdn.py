@@ -112,16 +112,23 @@ class CSDNSource(IDataSource):
             if isinstance(data, dict):
                 if "result_vos" in data:
                     items = data.get("result_vos", [])
-                else:
+                elif "data" in data:
                     inner = data.get("data", {})
                     if isinstance(inner, dict):
-                        items = inner.get("list", [])
+                        items = inner.get("list", inner.get("result_vos", inner.get("items", [])))
                     elif isinstance(inner, list):
                         items = inner
+                elif "list" in data:
+                    items = data.get("list", [])
+                elif "items" in data:
+                    items = data.get("items", [])
+                elif "results" in data:
+                    items = data.get("results", [])
             elif isinstance(data, list):
                 items = data
 
-            logger.debug("CSDN search returned %d raw items for query '%s'", len(items), keywords)
+            logger.info("CSDN search returned %d raw items for query '%s' (top-level keys: %s)",
+                        len(items), keywords, list(data.keys())[:10] if isinstance(data, dict) else "list")
 
             for item in items:
                 if not isinstance(item, dict):
@@ -141,6 +148,17 @@ class CSDNSource(IDataSource):
                     continue
                 seen_usernames.add(username)
 
+                # Try to fetch detailed profile for better name and institution
+                detail = await self.get_detail(username)
+                name = username
+                institution: str | None = None
+                extraction_method = "unverified"
+                if detail:
+                    if detail.name and detail.name != username:
+                        name = detail.name
+                    institution = detail.institution
+                    extraction_method = "direct"
+
                 title = item.get("title", "") or ""
                 description = (
                     item.get("description")
@@ -151,18 +169,26 @@ class CSDNSource(IDataSource):
                 )
                 article_url = item.get("url", "") or item.get("article_url", "") or ""
 
+                raw_metadata: dict[str, Any] = {
+                    "source": "csdn",
+                    "username": username,
+                    "article_title": title,
+                    "article_description": description[:300] if description else "",
+                    "article_url": article_url,
+                    "article_type": item.get("type", ""),
+                }
+                if detail and detail.raw_metadata:
+                    raw_metadata.update(detail.raw_metadata)
+
                 candidates.append(
                     RawCandidate(
-                        name=username,
+                        name=name,
+                        institution=institution,
                         profile_url=f"{CSDN_BLOG_URL}/{username}",
-                        raw_metadata={
-                            "source": "csdn",
-                            "username": username,
-                            "article_title": title,
-                            "article_description": description[:300] if description else "",
-                            "article_url": article_url,
-                            "article_type": item.get("type", ""),
-                        },
+                        raw_metadata=raw_metadata,
+                        result_type="profile_page",
+                        confidence="medium",
+                        extraction_method=extraction_method,
                     )
                 )
 
@@ -240,7 +266,8 @@ class CSDNSource(IDataSource):
 
         Uses regex and string extraction — no HTML parser dependency.
         CSDN pages embed profile data in predictable HTML patterns and
-        JSON-LD script tags.
+        JSON-LD script tags. Multiple fallback patterns are tried for
+        resilience against page structure changes.
         """
         profile: dict[str, Any] = {"username": username}
 
@@ -249,39 +276,102 @@ class CSDNSource(IDataSource):
         if title_match:
             profile["nickname"] = title_match.group(1).strip()
 
+        # Fallback: nickname from meta og:title
+        if not profile.get("nickname"):
+            og_title_match = re.search(
+                r'<meta\s+property=["\']og:title["\'][^>]*content=["\']([^"\']+)["\']',
+                html,
+            )
+            if og_title_match:
+                raw = og_title_match.group(1).strip()
+                profile["nickname"] = raw.replace("-CSDN博客", "").replace("- CSDN博客", "").strip()
+
+        # Fallback: nickname from JSON-LD structured data
+        ld_json_match = re.search(
+            r'<script\s+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+            html,
+            re.DOTALL,
+        )
+        if ld_json_match:
+            profile["has_structured_data"] = True
+            ld_text = ld_json_match.group(1)
+            # Try to extract name from JSON-LD
+            name_m = re.search(r'"name"\s*:\s*"([^"]+)"', ld_text)
+            if name_m and not profile.get("nickname"):
+                profile["nickname"] = name_m.group(1).strip()
+            # Try to extract description from JSON-LD
+            desc_m = re.search(r'"description"\s*:\s*"([^"]+)"', ld_text)
+            if desc_m and not profile.get("description"):
+                profile["description"] = desc_m.group(1).strip()[:500]
+
         # Extract article stats from common CSDN page patterns
         # Profile statistics are often in data attributes or specific spans
         stats: dict[str, int] = {}
 
-        # Original articles count
-        m = re.search(r'原创[：:\s]*(\d+)', html)
-        if m:
-            stats["original_articles"] = int(m.group(1))
+        # Original articles count — try multiple patterns
+        for pattern in [
+            r'原创[：:\s]*(\d+)',
+            r'class=["\'][^"\']*?count-item[^"\']*?["\'][^>]*>\s*原创\s*[：:\s]*<[^>]*>\s*(\d+)',
+            r'data-title=["\']原创["\'][^>]*>\s*(\d+)',
+        ]:
+            m = re.search(pattern, html)
+            if m:
+                stats["original_articles"] = int(m.group(1))
+                break
 
-        # Fans count
-        m = re.search(r'粉丝[：:\s]*(\d+)', html)
-        if m:
-            stats["fans_count"] = int(m.group(1))
+        # Fans count — try multiple patterns
+        for pattern in [
+            r'粉丝[：:\s]*(\d+)',
+            r'class=["\'][^"\']*?count-item[^"\']*?["\'][^>]*>\s*粉丝\s*[：:\s]*<[^>]*>\s*(\d+)',
+            r'data-title=["\']粉丝["\'][^>]*>\s*(\d+)',
+        ]:
+            m = re.search(pattern, html)
+            if m:
+                stats["fans_count"] = int(m.group(1))
+                break
 
-        # Rank
-        m = re.search(r'等级[：:\s]*[\w\d]*?(\d+)', html)
-        if m:
-            stats["rank_level"] = int(m.group(1))
+        # Rank / level
+        for pattern in [
+            r'等级[：:\s]*[\w\d]*?(\d+)',
+            r'class=["\'][^"\']*?level[^"\']*?["\'][^>]*>\s*(\d+)',
+        ]:
+            m = re.search(pattern, html)
+            if m:
+                stats["rank_level"] = int(m.group(1))
+                break
 
         # Total visits
-        m = re.search(r'访问[：:\s]*(\d+)', html)
-        if m:
-            stats["total_visits"] = int(m.group(1))
+        for pattern in [
+            r'访问[：:\s]*(\d+)',
+            r'class=["\'][^"\']*?count-item[^"\']*?["\'][^>]*>\s*访问\s*[：:\s]*<[^>]*>\s*(\d+)',
+            r'data-title=["\']访问["\'][^>]*>\s*(\d+)',
+        ]:
+            m = re.search(pattern, html)
+            if m:
+                stats["total_visits"] = int(m.group(1))
+                break
 
-        # Total articles (another common pattern)
-        m = re.search(r'文章[：:\s]*(\d+)', html)
-        if m:
-            stats["total_articles"] = int(m.group(1))
+        # Total articles
+        for pattern in [
+            r'文章[：:\s]*(\d+)',
+            r'class=["\'][^"\']*?count-item[^"\']*?["\'][^>]*>\s*文章\s*[：:\s]*<[^>]*>\s*(\d+)',
+            r'data-title=["\']文章["\'][^>]*>\s*(\d+)',
+        ]:
+            m = re.search(pattern, html)
+            if m:
+                stats["total_articles"] = int(m.group(1))
+                break
 
         # Comments count
-        m = re.search(r'评论[：:\s]*(\d+)', html)
-        if m:
-            stats["comments_count"] = int(m.group(1))
+        for pattern in [
+            r'评论[：:\s]*(\d+)',
+            r'class=["\'][^"\']*?count-item[^"\']*?["\'][^>]*>\s*评论\s*[：:\s]*<[^>]*>\s*(\d+)',
+            r'data-title=["\']评论["\'][^>]*>\s*(\d+)',
+        ]:
+            m = re.search(pattern, html)
+            if m:
+                stats["comments_count"] = int(m.group(1))
+                break
 
         profile["stats"] = stats
 
@@ -296,23 +386,34 @@ class CSDNSource(IDataSource):
                 r'class="tag"[^>]*>\s*([^<]+)\s*<',
                 html,
             )
+        if not categories:
+            # Try newer CSDN pattern
+            categories = re.findall(
+                r'class=["\'][^"\']*?tag[^"\']*?["\'][^>]*>\s*([^<]+?)\s*</a>',
+                html,
+            )
         profile["categories"] = list(set(c.strip() for c in categories if c.strip()))
 
-        # Try to extract the JSON-LD structured data
-        ld_json_match = re.search(
-            r'<script\s+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
-            html,
-            re.DOTALL,
-        )
-        if ld_json_match:
-            profile["has_structured_data"] = True
+        # Extract company from profile page (common in newer CSDN layouts)
+        company_patterns = [
+            r'公司[：:\s]*<[^>]*>\s*([^<]+)\s*</',
+            r'class=["\'][^"\']*?company[^"\']*?["\'][^>]*>\s*([^<]+)\s*</',
+            r'所在公司[：:\s]*([^<\n]+?)(?:\n|<)',
+        ]
+        for pattern in company_patterns:
+            cm = re.search(pattern, html)
+            if cm:
+                company_val = cm.group(1).strip()
+                if company_val and company_val not in ("暂无", "无", "-", ""):
+                    profile["company"] = company_val
+                    break
 
-        # Extract description/motto
+        # Extract description/motto from meta tag
         desc_match = re.search(
             r'<meta\s+name=["\']description["\'][^>]*content=["\']([^"\']+)["\']',
             html,
         )
-        if desc_match:
+        if desc_match and not profile.get("description"):
             profile["description"] = desc_match.group(1).strip()[:500]
 
         return profile

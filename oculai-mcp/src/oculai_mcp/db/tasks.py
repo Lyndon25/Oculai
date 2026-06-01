@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from oculai_mcp.db.client import execute_with_retry, fetch_with_retry, fetchrow_with_retry
+from oculai_mcp.db.iterations import get_task_iterations
 
 logger = logging.getLogger(__name__)
 
@@ -19,12 +20,34 @@ async def claim_task_batch(
     agent_id: str,
     timeout_minutes: int = 10,
 ) -> list[dict[str, Any]]:
-    """Claim a batch of ready tasks using FOR UPDATE SKIP LOCKED."""
+    """Claim a batch of ready tasks using FOR UPDATE SKIP LOCKED.
+
+    If a task has retry_count > 0, its previous TaskIteration history is
+    injected into the returned record under 'previous_iterations' so the
+    new agent instance can resume from where the previous one left off.
+    """
     rows = await fetch_with_retry(
         "SELECT * FROM claim_task_batch($1, $2, $3, $4, $5)",
         run_id, task_types, batch_size, agent_id, timeout_minutes,
     )
     result = [dict(row) for row in rows]
+
+    # Resume enhancement: inject previous iteration history for retried tasks
+    for task in result:
+        if task.get("retry_count", 0) > 0:
+            iterations = await get_task_iterations(task["task_id"])
+            if iterations:
+                task["previous_iterations"] = iterations
+                task["resume_hint"] = (
+                    f"This task was previously attempted {task['retry_count']} time(s). "
+                    f"Review previous_iterations ({len(iterations)} steps) and continue "
+                    f"from where it left off. Do NOT repeat searches already performed."
+                )
+                logger.info(
+                    "Injected %d previous iterations into task=%s for resume by %s",
+                    len(iterations), task["task_id"], agent_id,
+                )
+
     if result:
         logger.info("Agent %s claimed %d tasks for run=%s", agent_id, len(result), run_id)
     return result

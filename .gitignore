@@ -58,3 +58,4 @@ temp/
 oculai-mcp/run_test_*.py
 oculai-mcp/run_pipeline.py
 oculai-mcp/mcp_call.py
+oculai-mcp/generate_report_*.py

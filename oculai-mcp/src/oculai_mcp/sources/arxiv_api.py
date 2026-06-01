@@ -305,6 +305,10 @@ class ArxivAPISource(IDataSource):
                 cat_counts[c] = cat_counts.get(c, 0) + 1
             top_categories = sorted(cat_counts.items(), key=lambda x: x[1], reverse=True)[:5]
 
+            # Build an arXiv author search URL as a verifiable profile link
+            from urllib.parse import quote_plus
+            arxiv_search_url = f"https://arxiv.org/search/?searchtype=author&query={quote_plus(name)}"
+
             candidates.append(
                 RawCandidate(
                     name=name,
@@ -313,6 +317,7 @@ class ArxivAPISource(IDataSource):
                     h_index=0,  # arXiv does not provide h-index
                     citation_count=0,  # arXiv does not provide citation counts
                     research_areas=research_areas if research_areas else None,
+                    profile_url=arxiv_search_url,
                     raw_metadata={
                         "source": "arxiv_api",
                         "recent_papers": data["papers"][:5],
