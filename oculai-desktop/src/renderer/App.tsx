@@ -4,11 +4,22 @@ import { TitleBar } from "./components/layout/TitleBar.js";
 import { Sidebar } from "./components/layout/Sidebar.js";
 import { MainPanel } from "./components/layout/MainPanel.js";
 import { SettingsView } from "./components/settings/SettingsView.js";
+import type {
+  SubagentSpawnedEvent,
+  SubagentProgressEvent,
+  SubagentCompletedEvent,
+  CandidateUpsertedEvent,
+  OrchestratorPhaseEvent,
+} from "../shared/events.js";
 
 export default function App() {
   const settingsOpen = useStore((s) => s.settingsOpen);
   const setSystemStatus = useStore((s) => s.setSystemStatus);
   const addMessage = useStore((s) => s.addMessage);
+  const addSubagent = useStore((s) => s.addSubagent);
+  const updateSubagent = useStore((s) => s.updateSubagent);
+  const addActivity = useStore((s) => s.addActivity);
+  const setOrchestratorPhase = useStore((s) => s.setOrchestratorPhase);
 
   // On mount: hydrate runs from persisted recent-runs.json
   useEffect(() => {
@@ -83,7 +94,7 @@ export default function App() {
         const data = payload as { toolName: string; input: Record<string, unknown> };
         addMessage({
           role: "tool",
-          content: `Calling ${data.toolName}(${JSON.stringify(data.input).slice(0, 100)}...)`,
+          content: `${data.toolName}(${JSON.stringify(data.input).slice(0, 100)}...)`,
           timestamp: new Date().toISOString(),
           toolName: data.toolName,
         });
@@ -110,7 +121,7 @@ export default function App() {
       }),
     );
 
-    // Run events
+    // Run created
     unsubs.push(
       window.oculai.on("run:created", (payload: unknown) => {
         const data = payload as { runId: string; title: string; status: string };
@@ -122,15 +133,94 @@ export default function App() {
           updated_at: new Date().toISOString(),
         });
         useStore.getState().setActiveRun(data.runId);
+        useStore.getState().clearSubagents();
+        useStore.getState().clearActivity();
+      }),
+    );
+
+    // Orchestrator phase changes
+    unsubs.push(
+      window.oculai.on("orchestrator:phase", (payload: unknown) => {
+        const data = payload as OrchestratorPhaseEvent;
+        setOrchestratorPhase(data.phase);
+      }),
+    );
+
+    // Subagent spawned
+    unsubs.push(
+      window.oculai.on("subagent:spawned", (payload: unknown) => {
+        const data = payload as SubagentSpawnedEvent;
+        addSubagent({
+          agentId: data.agentId,
+          agentType: data.agentType,
+          target: data.target,
+          status: data.status,
+          spawnedAt: new Date().toISOString(),
+        });
+        addActivity({
+          timestamp: new Date().toISOString(),
+          agentId: data.agentId,
+          agentType: data.agentType,
+          action: "search",
+          message: `${data.agentType} spawned for ${data.target}`,
+        });
+      }),
+    );
+
+    // Subagent progress
+    unsubs.push(
+      window.oculai.on("subagent:progress", (payload: unknown) => {
+        const data = payload as SubagentProgressEvent;
+        addActivity(data.activity);
+      }),
+    );
+
+    // Subagent completed
+    unsubs.push(
+      window.oculai.on("subagent:completed", (payload: unknown) => {
+        const data = payload as SubagentCompletedEvent;
+        updateSubagent(data.agentId, {
+          status: data.status,
+          resultCount: data.resultCount,
+          error: data.error,
+          completedAt: new Date().toISOString(),
+        });
+        addActivity({
+          timestamp: new Date().toISOString(),
+          agentId: data.agentId,
+          agentType: data.agentType,
+          action: data.status === "error" ? "error" : "found",
+          message: data.status === "done"
+            ? `${data.agentType} completed with ${data.resultCount ?? 0} results`
+            : `${data.agentType} failed: ${data.error ?? "unknown error"}`,
+        });
+      }),
+    );
+
+    // Candidate upserted
+    unsubs.push(
+      window.oculai.on("candidate:upserted", (payload: unknown) => {
+        const data = payload as CandidateUpsertedEvent;
+        addActivity({
+          timestamp: new Date().toISOString(),
+          action: "upsert",
+          message: `New candidate: ${data.name}${data.institution ? ` (${data.institution})` : ""}`,
+          detail: data.sourceName ? `via ${data.sourceName}` : undefined,
+        });
       }),
     );
 
     // Report ready
     unsubs.push(
       window.oculai.on("report:ready", (payload: unknown) => {
-        const data = payload as { runId: string; html: string };
+        const data = payload as { runId: string; html: string; format: string };
         useStore.getState().setReportHtml(data.html);
         useStore.getState().setActiveTab("report");
+        addActivity({
+          timestamp: new Date().toISOString(),
+          action: "export",
+          message: `Report exported (${data.format})`,
+        });
       }),
     );
 

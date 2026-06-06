@@ -158,32 +158,6 @@ CREATE INDEX IF NOT EXISTS idx_pei_source ON PersonExternalIdentity (source_type
 CREATE INDEX IF NOT EXISTS idx_pei_primary ON PersonExternalIdentity (person_id, is_primary) WHERE is_primary = true;
 
 -- ============================================================
--- SearchRoundState: per-round search metrics for deep search orchestrator
--- ============================================================
-CREATE TABLE IF NOT EXISTS searchroundstate (
-    round_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    run_id           UUID NOT NULL REFERENCES sourcingrun(run_id) ON DELETE CASCADE,
-    hypothesis_id    TEXT NOT NULL,
-    source_name      TEXT NOT NULL,
-    round_number     INT NOT NULL,
-    query_used       JSONB NOT NULL DEFAULT '{}',
-    results_count    INT NOT NULL DEFAULT 0,
-    verified_count   INT NOT NULL DEFAULT 0,
-    persisted_count  INT NOT NULL DEFAULT 0,
-    signal_quality   REAL,
-    result_diversity REAL,
-    is_saturated     BOOLEAN DEFAULT false,
-    terminated_reason TEXT,
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-    UNIQUE (run_id, hypothesis_id, source_name, round_number)
-);
-
-CREATE INDEX IF NOT EXISTS idx_srs_run ON searchroundstate (run_id);
-CREATE INDEX IF NOT EXISTS idx_srs_source ON searchroundstate (source_name, is_saturated);
-CREATE INDEX IF NOT EXISTS idx_srs_hypo ON searchroundstate (run_id, hypothesis_id);
-
--- ============================================================
 -- AssessmentScoreHistory — tracks every score change per dimension
 -- ============================================================
 CREATE TABLE IF NOT EXISTS AssessmentScoreHistory (
@@ -204,30 +178,3 @@ CREATE TABLE IF NOT EXISTS AssessmentScoreHistory (
 CREATE INDEX IF NOT EXISTS idx_score_history_run_person ON AssessmentScoreHistory(run_id, person_id);
 CREATE INDEX IF NOT EXISTS idx_score_history_changed_at ON AssessmentScoreHistory(changed_at DESC);
 
--- ============================================================
--- ReviewSession — multi-pass review orchestrator state machine
--- ============================================================
-DO $$ BEGIN
-    CREATE DOMAIN review_pass_t AS TEXT
-        CHECK (VALUE IN ('enrichment','initial_scoring','audit','adjustment','complete'));
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
-CREATE TABLE IF NOT EXISTS ReviewSession (
-    session_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    run_id                UUID NOT NULL REFERENCES SourcingRun(run_id) ON DELETE CASCADE,
-    status                TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','completed','failed')),
-    current_pass          review_pass_t NOT NULL DEFAULT 'enrichment',
-    role_type             TEXT NOT NULL DEFAULT 'default',
-    target_candidate_ids  UUID[] NOT NULL DEFAULT '{}',
-    completed_candidate_ids UUID[] NOT NULL DEFAULT '{}',
-    failed_candidate_ids  UUID[] NOT NULL DEFAULT '{}',
-    audit_findings        JSONB DEFAULT '{}',
-    pass_timings          JSONB DEFAULT '{}',
-    created_at            TIMESTAMPTZ DEFAULT now(),
-    completed_at          TIMESTAMPTZ,
-    updated_at            TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_review_session_run ON ReviewSession(run_id);
-CREATE INDEX IF NOT EXISTS idx_review_session_status ON ReviewSession(status, current_pass);

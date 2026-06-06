@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Oculai is a **multi-Agent collaborative talent sourcing system** for **Chinese company HRs**. Claude Code is the sole orchestrator/decision-maker. PostgreSQL is the global async state pool. The Python/MCP layer exposes only deterministic functions — **no LLM calls, no autonomous decisions**.
+Oculai is a **multi-Agent collaborative talent sourcing system** for **Chinese company HRs**. The Pi AI agent (embedded via `@earendil-works/pi-coding-agent` SDK) is the orchestrator — it decides search strategy, spawns specialized subagents, evaluates candidates, and produces reports. PostgreSQL is the global async state pool. The Python/MCP layer exposes only deterministic functions — **no LLM calls, no autonomous decisions**.
 
-**Core constraint: Only search for Chinese/China-based candidates.** All sources, queries, and evidence gathering must target Chinese talent. See `oculai/skills/oculai-talent-sourcing/SKILL.md` for the China-First Mandate.
+**Core constraint: Only search for Chinese/China-based candidates.** All sources, queries, and evidence gathering must target Chinese talent (China-First Mandate).
 
 ## Architecture Principle
 
@@ -21,24 +21,27 @@ FastMCP Server (deterministic tools only)
 PostgreSQL 16 + pgvector (single source of truth)
 ```
 
-**Mode B: Electron Desktop App**
+**Mode B: Electron Desktop App (Primary)**
 ```
 Oculai Desktop (Electron + React)
     └── Electron Main Process
         ├── embedded PostgreSQL (PostgresManager, port 15432)
         ├── Python sidecar (jsonl_server.py, child_process.spawn)
         │   └── JSONL protocol over stdin/stdout
-        └── Pi AI AgentSession (pi-coding-agent SDK)
-            └── 41 Oculai tools registered as Pi extension tools
+        └── Pi AgentSession (pi-coding-agent SDK)
+            ├── System prompt: role + constraints (~150 lines, src/shared/prompts.ts)
+            ├── 41 Oculai tools as extension tools (via createExtensionRuntime)
+            └── 8 inline subagent profiles (via ResourceLoader.getAgentsFiles)
 ```
 
-- Main Agent reads `oculai/skills/oculai-talent-sourcing/SKILL.md` for the orchestration protocol
-- 8 subagents in `oculai/agents/` are Markdown prompts, not Python classes; Query Optimizer handles iterative search refinement
-- 5 slash commands in `oculai/commands/` activate the skill
+- Pi decides orchestration dynamically — no fixed 15-step pipeline. It analyzes the JD, spawns subagents in parallel, and adapts based on results.
+- 8 subagent types are defined inline in `pi-session.ts` (not separate markdown files):
+  Search Strategist, Source Researcher, Query Optimizer, Identity Resolver,
+  Profile Enricher, Fit Evaluator, Quality Auditor, Outreach Strategist
 - Workflows are DAG-based: Plan → Task (free-form TEXT type) → TaskDependency
 - Concurrent task claiming uses PostgreSQL `FOR UPDATE SKIP LOCKED`
 - ReAct iteration logs and cross-agent discovery broadcasts are persisted for auditability and resume
-- The desktop app bundles all resources (schema, agents, skills, commands) under `oculai-desktop/resources/`
+- The desktop app bundles schema SQL under `oculai-desktop/resources/schema/`
 
 ## Common Commands
 
@@ -80,14 +83,20 @@ cd oculai-mcp && fastmcp dev src/oculai_mcp/server.py
 # Install dependencies
 cd oculai-desktop && npm install
 
-# Dev mode (Vite HMR + Electron)
+# Dev mode (Vite HMR + Electron via concurrently)
 cd oculai-desktop && npm run dev
 
-# Type check
+# Generate Pi extension tool stubs from the Python tool registry
+cd oculai-desktop && npm run generate-tools
+
+# Type check (no emit)
 cd oculai-desktop && npm run typecheck
 
-# Production build
+# Production build (generate-tools → tsc → vite → electron-builder)
 cd oculai-desktop && npm run build
+
+# Launch packaged app (after build)
+cd oculai-desktop && npm run start
 ```
 
 The Electron app embeds its own PostgreSQL (via `postgres-manager.ts`) and spawns the Python JSONL server as a child process. It does NOT require Docker.
@@ -116,6 +125,15 @@ cd oculai-mcp && python tests/integration_test.py
 ```
 
 No pytest test cases are currently committed. Product acceptance testing is through full Oculai pipeline runs saved under `temp/test/<NNN>-<slug>/`.
+
+### Utility Scripts
+```bash
+# Check if schema SQL has drifted from the DB client expectations
+python scripts/check_schema_drift.py
+
+# Generate Pi extension tool TypeScript stubs (called by npm run generate-tools)
+python scripts/generate_pi_tools.py
+```
 
 ## Environment
 
@@ -256,24 +274,22 @@ The JD must include: role title, company context, required skills, nice-to-haves
 
 **2. Execute the full skill pipeline**
 
-Run the complete pipeline as defined in `oculai/skills/oculai-talent-sourcing/SKILL.md`:
+Run the complete Oculai pipeline (Pi orchestrates dynamically, not a fixed 15-step sequence):
 
 ```
-1. oculai_create_run
-2. oculai_list_source_capabilities
-3. Launch Search Strategist subagent
-4. oculai_checkpoint_plan (persists the Plan + Task DAG)
-5. Launch Source Researchers in parallel with iterative think-search
-6. Record iterations and terminology discoveries via oculai_record_iteration / oculai_broadcast_discovery
-7. Launch Query Optimizer when results are noisy, skewed, or sparse
-8. oculai_upsert_candidate or oculai_upsert_candidates_batch
-9. Launch Identity Resolver
-10. Launch Profile Enrichers
-11. Launch Fit Evaluators
-12. Launch Quality Auditor and apply any approved audit adjustments
-13. oculai_export_report (format=html)
-14. (optional) Launch Outreach Strategist and request human approval
-15. Present results
+1. oculai_create_run — Initialize run with JD
+2. oculai_list_source_capabilities — Confirm available sources
+3. Pi analyzes JD and designs search strategy (autonomous)
+4. oculai_checkpoint_plan — Persist strategy + task DAG
+5. Pi spawns Source Researchers in parallel across independent sources
+6. oculai_upsert_candidate / oculai_upsert_candidates_batch — Persist candidates
+7. oculai_broadcast_discovery — Share terminology across agents
+8. Identity Resolver — Merge duplicates, link identities
+9. Profile Enrichers in parallel — Deep-dive candidate profiles
+10. Fit Evaluators in parallel — Score candidates on dimensions
+11. Quality Auditor — Audit shortlist quality, bias, compliance
+12. oculai_export_report (format=html) — Generate deliverable
+13. (optional) Outreach Strategist — Draft outreach (requires human approval)
 ```
 
 **3. Save all deliverables**
@@ -329,28 +345,55 @@ The `oculai-desktop/` directory is a standalone Electron application that packag
 | `settings-store.ts` | Persistent settings via `electron-store` (API keys, LLM provider/model, thinking level). |
 
 ### Renderer (React)
-- 7 tabs: Dashboard, Pipeline, Candidates, Evidence, Report, Logs, Settings
+- Dashboard (JD submission form) + Agent Orchestration Dashboard (real-time agent grid, activity feed)
+- Bottom drawer: Candidates, Evidence, Report, Logs tabs
 - State management via Zustand (`store/index.ts`)
-- Real-time streaming of agent thinking/messages/tool calls via IPC events
+- Real-time streaming of agent thinking/messages/tool calls/subagent lifecycles via IPC events
 - Charts via Recharts, UI components with Tailwind CSS
 
 ### IPC Channel Design
 Typed IPC channels in `src/shared/ipc-channels.ts` split into:
-- **Run lifecycle**: `run:create`, `run:state`, `run:error`
-- **Pipeline streaming**: `pipeline:update`, `task:updated`, `iteration:recorded`
+- **Run lifecycle**: `run:created`, `run:error`
+- **Orchestrator**: `orchestrator:phase` — pipeline phase transitions
+- **Subagent lifecycle**: `subagent:spawned`, `subagent:progress`, `subagent:completed`
 - **Agent streaming**: `agent:thinking`, `agent:message`, `agent:tool_call`, `agent:tool_result`
+- **Candidates**: `candidate:upserted` — live candidate discovery
 - **System**: `system:status`, `system:log`
-- **Actions** (renderer→main): `action:startRun`, `action:resumeRun`, `action:abortRun`, `action:exportReport`
+- **Actions** (renderer→main): `action:startRun`, `action:resumeRun`, `action:abortRun`, `action:getRunState`, `action:exportReport`, `action:listRuns`, `action:getCandidates`, `action:getCandidateDetail`
 
 ### Build & Package
 - `vite build` for renderer, `tsc -p tsconfig.main.json` for main process
 - `electron-builder` produces NSIS installer (Windows), DMG (macOS), AppImage (Linux)
-- Schema SQL, agent prompts, skill definition, and slash commands are bundled as `extraResources`
+- Schema SQL is bundled under `resources/schema/`. Subagent profiles are defined inline in `pi-session.ts`.
+- **`pi-windows-x64/` is also an `extraResource`** — the pi.exe binary is included in the final installer even though it's gitignored (see `electron-builder.yml` for the full config)
+- Installer outputs go to `oculai-desktop/dist-electron/`
+
+### Shared IPC Layer (`oculai-desktop/src/shared/`)
+The `src/shared/` directory defines the typed contract between the Electron main process and the React renderer:
+
+| Module | Role |
+|---|---|
+| `ipc-channels.ts` | Typed IPC channel constants (main↔renderer event names) |
+| `types.ts` | Shared TypeScript interfaces (Run, Candidate, SubagentState, ActivityEntry, SystemStatus) |
+| `events.ts` | Event payload type definitions (including subagent lifecycle events) |
+| `prompts.ts` | System prompt — role definition + constraints (~150 lines) |
+
+The renderer never imports from `src/main/` and vice versa — all cross-process communication goes through the IPC channels defined here.
+
+### System Prompt & Subagent Profiles
+The system prompt (`src/shared/prompts.ts`) is a concise ~150-line role definition with constraints (China-First Mandate, evidence tiers, assessment dimensions, source priorities). It no longer prescribes a fixed 15-step workflow — Pi decides the orchestration dynamically.
+
+Subagent profiles are defined inline in `pi-session.ts` via Pi's `ResourceLoader.getAgentsFiles()`. The old `resource-loader.ts` (filesystem-based skill/agent discovery) has been removed. 8 subagent types are defined as concise role descriptions directly in TypeScript.
 
 ### Pi Runtime
 `pi-windows-x64/` contains the Pi CLI runtime binary (`pi.exe`, ~121MB) and SDK examples. The Electron app's `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` npm packages wrap this runtime. The runtime handles LLM communication, context management, tool execution, and session persistence — Oculai provides the tools and system prompt on top.
 
 > **Note:** `pi.exe` is currently gitignored (not tracked in version control). The npm dependency should download the appropriate runtime automatically. If you need to version the binary in the repo, switch to Git LFS: `git lfs track "pi-windows-x64/pi.exe"` and remove the `pi-windows-x64/` line from `.gitignore`.
+
+**Current pin:** `@earendil-works/pi-ai` + `@earendil-works/pi-coding-agent` at `^0.78.1`. Upgrading these is a key maintenance operation:
+- Minor bumps (`^0.78.x` → `^0.79.x`) may introduce API changes to `AgentSession`, tool registration, or event subscription
+- Always review Pi's release notes before bumping
+- The pi.exe binary version is coupled to the npm package version — `npm update` pulls the matching binary
 
 ## Git LFS & Large File Management
 
@@ -375,9 +418,9 @@ The following large artifacts exist in the repo tree — all are gitignored to p
 
 | Directory | Purpose |
 |---|---|
-| `oculai/skills/` | Claude Code skill definition (trigger, protocol, references) |
-| `oculai/agents/` | 8 subagent Markdown prompt files |
-| `oculai/commands/` | 5 slash command definitions |
+| `oculai/skills/` | (deprecated — removed, now inline in `prompts.ts`) |
+| `oculai/agents/` | (deprecated — removed, now inline in `pi-session.ts`) |
+| `oculai/commands/` | (deprecated — removed, replaced by GUI actions) |
 | `oculai-db/` | Docker Compose, PostgreSQL config, SQL schema migrations |
 | `oculai-mcp/src/oculai_mcp/` | Python MCP server source |
 | `oculai-mcp/src/oculai_mcp/db/` | Database access layer (asyncpg, CRUD, retry logic, task iterations, broadcasts, search state, quotas, provenance, lineage) |
@@ -389,7 +432,9 @@ The following large artifacts exist in the repo tree — all are gitignored to p
 | `oculai-mcp/src/oculai_mcp/tool_registry.py` | Flat `TOOL_REGISTRY` dict of all 41 tool handlers (no MCP dependency) |
 | `oculai-mcp/tests/` | MCP/database smoke test script |
 | `oculai-desktop/` | Electron desktop application (React + TypeScript + Vite + Tailwind) |
+| `oculai-desktop/src/shared/` | IPC contract types, channel constants, event payloads |
 | `oculai-desktop/src/main/` | Electron main process (PostgresManager, ToolBridge, Pi session, IPC handlers) |
 | `oculai-desktop/src/renderer/` | React UI (Dashboard, Pipeline, Candidates, Evidence, Report, Logs, Settings tabs) |
-| `oculai-desktop/resources/` | Bundled schema SQL, agent prompts, skill definition, slash commands |
+| `oculai-desktop/resources/` | Bundled schema SQL files only |
+| `scripts/` | Python utility scripts (schema drift check, Pi tool stubs generation) |
 | `pi-windows-x64/` | Pi CLI runtime binary (`pi.exe`) + TypeScript SDK examples — powers the Electron app's AI agent |

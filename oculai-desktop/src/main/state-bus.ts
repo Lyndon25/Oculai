@@ -12,15 +12,18 @@ import type {
   AgentThinkingEvent,
   AgentToolCallEvent,
   AgentToolResultEvent,
-  PipelineUpdateEvent,
+  CandidateUpsertedEvent,
+  OrchestratorPhaseEvent,
+  ReportReadyEvent,
   RunCreatedEvent,
   RunErrorEvent,
-  RunStateEvent,
+  SubagentCompletedEvent,
+  SubagentProgressEvent,
+  SubagentSpawnedEvent,
   SystemLogEvent,
   SystemStatusEvent,
-  TaskUpdatedEvent,
 } from "../shared/events.js";
-import type { PipelineState, SystemStatus } from "../shared/types.js";
+import type { PipelinePhase, SubagentState, SystemStatus, ActivityEntry } from "../shared/types.js";
 
 export class StateBus {
   private mainWindow: BrowserWindow | null = null;
@@ -63,28 +66,71 @@ export class StateBus {
     this.send(IPC_CHANNELS.RUN_CREATED, { runId, title, status } satisfies RunCreatedEvent);
   }
 
-  emitRunState(runState: RunStateEvent): void {
-    this.send(IPC_CHANNELS.RUN_STATE, runState);
-  }
-
   emitRunError(runId: string, error: string, phase: string): void {
     this.send(IPC_CHANNELS.RUN_ERROR, { runId, error, phase } satisfies RunErrorEvent);
   }
 
-  // ---- Pipeline ----
+  // ---- Orchestrator ----
 
-  emitPipelineUpdate(pipeline: PipelineUpdateEvent): void {
-    this.send(IPC_CHANNELS.PIPELINE_UPDATE, pipeline);
+  emitPhaseChange(runId: string, phase: PipelinePhase, metrics?: OrchestratorPhaseEvent["metrics"]): void {
+    this.send(IPC_CHANNELS.ORCHESTRATOR_PHASE, {
+      runId,
+      phase,
+      metrics,
+    } satisfies OrchestratorPhaseEvent);
   }
 
-  emitTaskUpdated(event: TaskUpdatedEvent): void {
-    this.send(IPC_CHANNELS.TASK_UPDATED, event);
+  // ---- Subagent lifecycle ----
+
+  emitSubagentSpawned(agentId: string, agentType: string, target: string): void {
+    this.send(IPC_CHANNELS.SUBAGENT_SPAWNED, {
+      agentId,
+      agentType,
+      target,
+      status: "active" as SubagentState["status"],
+    } satisfies SubagentSpawnedEvent);
+  }
+
+  emitSubagentProgress(agentId: string, activity: ActivityEntry): void {
+    this.send(IPC_CHANNELS.SUBAGENT_PROGRESS, {
+      agentId,
+      activity,
+    } satisfies SubagentProgressEvent);
+  }
+
+  emitSubagentCompleted(
+    agentId: string,
+    agentType: string,
+    target: string,
+    status: "done" | "error",
+    resultCount?: number,
+    error?: string,
+  ): void {
+    this.send(IPC_CHANNELS.SUBAGENT_COMPLETED, {
+      agentId,
+      agentType,
+      target,
+      status,
+      resultCount,
+      error,
+    } satisfies SubagentCompletedEvent);
+  }
+
+  // ---- Candidates ----
+
+  emitCandidateUpserted(personId: string, name: string, institution?: string, sourceName?: string): void {
+    this.send(IPC_CHANNELS.CANDIDATE_UPSERTED, {
+      personId,
+      name,
+      institution: institution ?? "",
+      sourceName: sourceName ?? "",
+    } satisfies CandidateUpsertedEvent);
   }
 
   // ---- Report ----
 
   emitReportReady(runId: string, html: string, format: string): void {
-    this.send(IPC_CHANNELS.REPORT_READY, { runId, html, format });
+    this.send(IPC_CHANNELS.REPORT_READY, { runId, html, format } satisfies ReportReadyEvent);
   }
 
   // ---- System ----

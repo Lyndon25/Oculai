@@ -115,32 +115,6 @@ export interface ScoreHistoryEntry {
   change_reason?: string;
 }
 
-export interface PlanTask {
-  task_id: string;
-  task_type: string;
-  task_name: string;
-  step_key?: string;
-  status: TaskStatus;
-  priority: number;
-  agent_id?: string;
-  claimed_by?: string;
-  retry_count: number;
-  max_retries: number;
-  error_message?: string;
-}
-
-export type TaskStatus = "pending" | "claimed" | "processing" | "done" | "error" | "timeout" | "skipped";
-
-export interface PipelineState {
-  run_id: string;
-  phase: PipelinePhase;
-  plan_id?: string;
-  tasks: PlanTask[];
-  task_progress: { total: number; completed: number; failed: number; pending: number };
-  subagents: SubagentState[];
-  metrics: QualityMetrics;
-}
-
 export type PipelinePhase =
   | "init"
   | "strategy"
@@ -153,20 +127,26 @@ export type PipelinePhase =
   | "outreach"
   | "complete";
 
+// ---- Live Agent Dashboard Types ----
+
 export interface SubagentState {
-  name: string;
-  status: "idle" | "running" | "done" | "error";
-  task_count?: number;
-  iterations?: number;
-  last_output?: string;
+  agentId: string;
+  agentType: string;
+  target: string;
+  status: "idle" | "active" | "done" | "error";
+  resultCount?: number;
+  spawnedAt?: string;
+  completedAt?: string;
+  error?: string;
 }
 
-export interface QualityMetrics {
-  extraction_quality_score?: number;
-  cross_source_verified?: number;
-  false_positive_rate?: number;
-  china_platform_coverage?: number;
-  total_candidates?: number;
+export interface ActivityEntry {
+  timestamp: string;
+  agentId?: string;
+  agentType?: string;
+  action: "think" | "search" | "found" | "classify" | "broadcast" | "upsert" | "score" | "audit" | "export" | "error";
+  message: string;
+  detail?: string;
 }
 
 export interface SourceCapability {

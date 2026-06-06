@@ -2,25 +2,19 @@
 
 export const IPC_CHANNELS = {
   // Run lifecycle
-  RUN_CREATE: "run:create",
   RUN_CREATED: "run:created",
-  RUN_STATE: "run:state",
   RUN_ERROR: "run:error",
 
-  // Pipeline
-  PIPELINE_UPDATE: "pipeline:update",
-  TASK_UPDATED: "task:updated",
-  ITERATION_RECORDED: "iteration:recorded",
+  // Orchestrator
+  ORCHESTRATOR_PHASE: "orchestrator:phase",
+
+  // Subagent lifecycle
+  SUBAGENT_SPAWNED: "subagent:spawned",
+  SUBAGENT_PROGRESS: "subagent:progress",
+  SUBAGENT_COMPLETED: "subagent:completed",
 
   // Candidates
   CANDIDATE_UPSERTED: "candidate:upserted",
-  CANDIDATE_SCORED: "candidate:scored",
-  CANDIDATES_LIST: "candidates:list",
-  CANDIDATE_DETAIL: "candidate:detail",
-
-  // Evidence
-  EVIDENCE_ATTACHED: "evidence:attached",
-  EVIDENCE_LIST: "evidence:list",
 
   // Agent streaming
   AGENT_THINKING: "agent:thinking",
@@ -35,10 +29,6 @@ export const IPC_CHANNELS = {
   SYSTEM_STATUS: "system:status",
   SYSTEM_LOG: "system:log",
 
-  // Settings
-  SETTINGS_GET: "settings:get",
-  SETTINGS_SET: "settings:set",
-
   // Actions from renderer
   START_RUN: "action:startRun",
   RESUME_RUN: "action:resumeRun",
@@ -48,6 +38,8 @@ export const IPC_CHANNELS = {
   GET_CANDIDATE_DETAIL: "action:getCandidateDetail",
   EXPORT_REPORT: "action:exportReport",
   LIST_RUNS: "action:listRuns",
+  SETTINGS_GET: "settings:get",
+  SETTINGS_SET: "settings:set",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

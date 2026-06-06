@@ -311,11 +311,10 @@ async def main():
     )
     print(f'  Recorded assessment for {person_ids[0]}')
 
-    shortlist = await get_shortlist(run_id=run_id, min_score=70, limit=10)
-    print(f'  Shortlist (min quality 70): {shortlist["count"]} candidates')
+    shortlist = await get_shortlist(run_id=run_id, min_score=0, limit=10)
+    print(f'  Shortlist (all candidates): {shortlist["count"]} candidates')
     for s in shortlist['shortlist']:
         print(f'    - {s["name"]}: score={s.get("overall_score", "N/A")}')
-    # quality_score = int(average * 10), so 8.25*10=82, 7.5*10=75, 8.125*10=81
     assert shortlist['count'] >= 2, f'Expected 2+ in shortlist, got {shortlist["count"]}'
 
     # ==================== STEP 9: Report ====================

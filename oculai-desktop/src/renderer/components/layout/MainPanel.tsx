@@ -1,14 +1,14 @@
 import { useStore } from "../../store/index.js";
 import { DashboardView } from "../dashboard/DashboardView.js";
-import { PipelineTab } from "../pipeline/PipelineTab.js";
+import { OrchestrationDashboard } from "../pipeline/OrchestrationDashboard.js";
 import { CandidatesTab } from "../candidates/CandidatesTab.js";
 import { EvidenceTab } from "../evidence/EvidenceTab.js";
 import { ReportTab } from "../report/ReportTab.js";
 import { LogsTab } from "../logs/LogsTab.js";
-import { GitBranch, Users, FileSearch, FileText, ScrollText } from "lucide-react";
+import { GitBranch, Users, FileSearch, FileText, ScrollText, ChevronUp, ChevronDown } from "lucide-react";
+import { useState } from "react";
 
-const TABS = [
-  { id: "pipeline" as const, label: "Pipeline", icon: GitBranch },
+const BOTTOM_TABS = [
   { id: "candidates" as const, label: "Candidates", icon: Users },
   { id: "evidence" as const, label: "Evidence", icon: FileSearch },
   { id: "report" as const, label: "Report", icon: FileText },
@@ -17,8 +17,9 @@ const TABS = [
 
 export function MainPanel() {
   const activeRunId = useStore((s) => s.activeRunId);
-  const activeTab = useStore((s) => s.activeTab);
+  const activeBottomTab = useStore((s) => s.activeTab);
   const setActiveTab = useStore((s) => s.setActiveTab);
+  const [drawerOpen, setDrawerOpen] = useState(true);
 
   if (!activeRunId) {
     return (
@@ -30,35 +31,53 @@ export function MainPanel() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Tab bar */}
-      <div className="flex items-center px-2 pt-2 gap-1 bg-gray-950">
-        {TABS.map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-t-md transition-colors ${
-                activeTab === tab.id
-                  ? "bg-gray-900 text-gray-200 border-t border-l border-r border-gray-800"
-                  : "text-gray-500 hover:text-gray-300 hover:bg-gray-900/50"
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              {tab.label}
-            </button>
-          );
-        })}
+      {/* Agent Dashboard */}
+      <div className="flex-1 overflow-hidden">
+        <OrchestrationDashboard />
       </div>
 
-      {/* Tab content */}
-      <div className="flex-1 overflow-hidden">
-        {activeTab === "pipeline" && <PipelineTab />}
-        {activeTab === "candidates" && <CandidatesTab />}
-        {activeTab === "evidence" && <EvidenceTab />}
-        {activeTab === "report" && <ReportTab />}
-        {activeTab === "logs" && <LogsTab />}
+      {/* Bottom Drawer Toggle */}
+      <div className="flex items-center justify-between px-4 py-1.5 bg-gray-900 border-t border-gray-800">
+        <div className="flex items-center gap-1">
+          {BOTTOM_TABS.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  if (!drawerOpen) setDrawerOpen(true);
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1 text-xs rounded transition-colors ${
+                  activeBottomTab === tab.id
+                    ? "bg-blue-600/20 text-blue-300"
+                    : "text-gray-500 hover:text-gray-300"
+                }`}
+              >
+                <Icon className="w-3 h-3" />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+        <button
+          onClick={() => setDrawerOpen(!drawerOpen)}
+          className="text-gray-500 hover:text-gray-300 p-1"
+        >
+          {drawerOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+        </button>
       </div>
+
+      {/* Bottom Drawer */}
+      {drawerOpen && (
+        <div className="h-72 border-t border-gray-800 overflow-hidden">
+          {activeBottomTab === "candidates" && <CandidatesTab />}
+          {activeBottomTab === "evidence" && <EvidenceTab />}
+          {activeBottomTab === "report" && <ReportTab />}
+          {activeBottomTab === "logs" && <LogsTab />}
+          {activeBottomTab === "pipeline" && <CandidatesTab />}
+        </div>
+      )}
     </div>
   );
 }

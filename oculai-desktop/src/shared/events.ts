@@ -1,15 +1,6 @@
 /** Event payload types for IPC communication. */
 
-import type {
-  Candidate,
-  CandidateDetail,
-  Evidence,
-  PipelineState,
-  QualityMetrics,
-  SourcingRun,
-  SubagentState,
-  SystemStatus,
-} from "./types.js";
+import type { SourcingRun, SystemStatus, SubagentState, PipelinePhase, ActivityEntry } from "./types.js";
 
 // ---- Agent streaming events ----
 
@@ -40,15 +31,45 @@ export interface RunCreatedEvent {
   status: string;
 }
 
-export interface RunStateEvent {
-  run: SourcingRun;
-  pipeline?: PipelineState;
-}
-
 export interface RunErrorEvent {
   runId: string;
   error: string;
   phase: string;
+}
+
+// ---- Orchestrator events ----
+
+export interface OrchestratorPhaseEvent {
+  runId: string;
+  phase: PipelinePhase;
+  metrics?: {
+    candidateCount?: number;
+    chinaCoverage?: number;
+    qualityScore?: number;
+  };
+}
+
+// ---- Subagent events ----
+
+export interface SubagentSpawnedEvent {
+  agentId: string;
+  agentType: string;
+  target: string;
+  status: SubagentState["status"];
+}
+
+export interface SubagentProgressEvent {
+  agentId: string;
+  activity: ActivityEntry;
+}
+
+export interface SubagentCompletedEvent {
+  agentId: string;
+  agentType: string;
+  target: string;
+  status: "done" | "error";
+  resultCount?: number;
+  error?: string;
 }
 
 // ---- Candidate events ----
@@ -56,50 +77,8 @@ export interface RunErrorEvent {
 export interface CandidateUpsertedEvent {
   personId: string;
   name: string;
-  institution?: string;
+  institution: string;
   sourceName: string;
-}
-
-export interface CandidateScoredEvent {
-  personId: string;
-  scores: Record<string, number>;
-  overall: number;
-  assessorAgent: string;
-}
-
-// ---- Evidence events ----
-
-export interface EvidenceAttachedEvent {
-  evidenceId: string;
-  personId: string;
-  type: string;
-  tier: number;
-  sourceName: string;
-}
-
-// ---- Pipeline events ----
-
-export interface PipelineUpdateEvent {
-  runId: string;
-  phase: string;
-  taskProgress: { total: number; completed: number; failed: number; pending: number };
-  subagents: SubagentState[];
-  metrics: QualityMetrics;
-}
-
-export interface TaskUpdatedEvent {
-  taskId: string;
-  taskType: string;
-  taskName: string;
-  status: string;
-  agentId?: string;
-}
-
-export interface IterationRecordedEvent {
-  taskId: string;
-  iterationNumber: number;
-  iterationType: string;
-  decision?: string;
 }
 
 // ---- Report events ----
@@ -132,10 +111,6 @@ export interface StartRunPayload {
   config?: Record<string, unknown>;
 }
 
-export interface GetRunStatePayload {
-  runId: string;
-}
-
 export interface GetCandidatesPayload {
   runId: string;
   status?: string;
@@ -145,6 +120,10 @@ export interface GetCandidatesPayload {
 
 export interface GetCandidateDetailPayload {
   personId: string;
+}
+
+export interface GetRunStatePayload {
+  runId: string;
 }
 
 export interface ExportReportPayload {

@@ -5,9 +5,11 @@ import { create } from "zustand";
 import type {
   Candidate,
   CandidateDetail,
-  PipelineState,
+  PipelinePhase,
   SourcingRun,
   SystemStatus,
+  SubagentState,
+  ActivityEntry,
 } from "../../shared/types.js";
 
 interface AgentMessage {
@@ -32,9 +34,21 @@ interface OculaiState {
   setRuns: (runs: SourcingRun[]) => void;
   updateRun: (runId: string, updates: Partial<SourcingRun>) => void;
 
-  // Pipeline
-  pipeline: PipelineState | null;
-  updatePipeline: (pipeline: Partial<PipelineState>) => void;
+  // Orchestrator
+  orchestratorPhase: PipelinePhase;
+  setOrchestratorPhase: (phase: PipelinePhase) => void;
+
+  // Subagents (live agent pool)
+  subagents: SubagentState[];
+  addSubagent: (agent: SubagentState) => void;
+  updateSubagent: (agentId: string, updates: Partial<SubagentState>) => void;
+  removeSubagent: (agentId: string) => void;
+  clearSubagents: () => void;
+
+  // Activity feed
+  activityFeed: ActivityEntry[];
+  addActivity: (entry: ActivityEntry) => void;
+  clearActivity: () => void;
 
   // Candidates
   candidates: Candidate[];
@@ -42,11 +56,10 @@ interface OculaiState {
   setCandidates: (candidates: Candidate[]) => void;
   setSelectedCandidate: (candidate: CandidateDetail | null) => void;
 
-  // Agent messages (chat log)
+  // Agent messages (detailed log)
   messages: AgentMessage[];
   addMessage: (msg: AgentMessage) => void;
   clearMessages: () => void;
-  streamingText: string;
 
   // UI
   activeTab: "pipeline" | "candidates" | "evidence" | "report" | "logs";
@@ -80,12 +93,41 @@ export const useStore = create<OculaiState>((set) => ({
       runs: s.runs.map((r) => (r.run_id === runId ? { ...r, ...updates } : r)),
     })),
 
-  // Pipeline
-  pipeline: null,
-  updatePipeline: (partial) =>
+  // Orchestrator
+  orchestratorPhase: "init",
+  setOrchestratorPhase: (phase) => set({ orchestratorPhase: phase }),
+
+  // Subagents
+  subagents: [],
+  addSubagent: (agent) =>
+    set((s) => {
+      const existing = s.subagents.findIndex((a) => a.agentId === agent.agentId);
+      if (existing >= 0) {
+        const updated = [...s.subagents];
+        updated[existing] = agent;
+        return { subagents: updated };
+      }
+      return { subagents: [...s.subagents, agent] };
+    }),
+  updateSubagent: (agentId, updates) =>
     set((s) => ({
-      pipeline: s.pipeline ? { ...s.pipeline, ...partial } : (partial as PipelineState),
+      subagents: s.subagents.map((a) =>
+        a.agentId === agentId ? { ...a, ...updates } : a,
+      ),
     })),
+  removeSubagent: (agentId) =>
+    set((s) => ({
+      subagents: s.subagents.filter((a) => a.agentId !== agentId),
+    })),
+  clearSubagents: () => set({ subagents: [] }),
+
+  // Activity
+  activityFeed: [],
+  addActivity: (entry) =>
+    set((s) => ({
+      activityFeed: [...s.activityFeed.slice(-199), entry], // keep last 200
+    })),
+  clearActivity: () => set({ activityFeed: [] }),
 
   // Candidates
   candidates: [],
@@ -95,13 +137,11 @@ export const useStore = create<OculaiState>((set) => ({
 
   // Messages
   messages: [],
-  streamingText: "",
   addMessage: (msg) =>
     set((s) => ({
       messages: [...s.messages, msg],
-      streamingText: msg.role === "assistant" && !msg.isThinking ? "" : s.streamingText,
     })),
-  clearMessages: () => set({ messages: [], streamingText: "" }),
+  clearMessages: () => set({ messages: [] }),
 
   // UI
   activeTab: "pipeline",

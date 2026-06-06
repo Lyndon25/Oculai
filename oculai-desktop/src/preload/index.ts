@@ -7,7 +7,6 @@ import type {
   ExportReportPayload,
   GetCandidateDetailPayload,
   GetCandidatesPayload,
-  GetRunStatePayload,
   StartRunPayload,
 } from "../shared/events.js";
 
@@ -21,9 +20,6 @@ const api = {
 
   abortRun: (runId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.ABORT_RUN, { runId }),
-
-  getRunState: (payload: GetRunStatePayload) =>
-    ipcRenderer.invoke(IPC_CHANNELS.GET_RUN_STATE, payload),
 
   getCandidates: (payload: GetCandidatesPayload) =>
     ipcRenderer.invoke(IPC_CHANNELS.GET_CANDIDATES, payload),
@@ -45,13 +41,19 @@ const api = {
 
   // ---- Events (main → renderer) ----
   on: (channel: string, callback: (...args: unknown[]) => void) => {
-    const validChannels = Object.values(IPC_CHANNELS).filter(
-      (ch) =>
-        !ch.startsWith("action:") &&
-        ch !== IPC_CHANNELS.SETTINGS_GET &&
-        ch !== IPC_CHANNELS.SETTINGS_SET
-    );
-    if (validChannels.includes(channel as never)) {
+    const actionChannels = [
+      IPC_CHANNELS.START_RUN,
+      IPC_CHANNELS.RESUME_RUN,
+      IPC_CHANNELS.ABORT_RUN,
+      IPC_CHANNELS.GET_CANDIDATES,
+      IPC_CHANNELS.GET_CANDIDATE_DETAIL,
+      IPC_CHANNELS.EXPORT_REPORT,
+      IPC_CHANNELS.LIST_RUNS,
+      IPC_CHANNELS.SETTINGS_GET,
+      IPC_CHANNELS.SETTINGS_SET,
+    ];
+    // Only allow event subscriptions (not action channels)
+    if (!actionChannels.includes(channel as never)) {
       const subscription = (_event: Electron.IpcRendererEvent, ...args: unknown[]) =>
         callback(...args);
       ipcRenderer.on(channel, subscription);

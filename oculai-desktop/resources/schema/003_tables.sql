@@ -452,34 +452,3 @@ CREATE TABLE IF NOT EXISTS SearchQueryLog (
     data_version       INTEGER NOT NULL DEFAULT 1
 );
 
--- ============================================================
--- 17. TaskIteration — agent reasoning step audit trail
--- ============================================================
-CREATE TABLE IF NOT EXISTS TaskIteration (
-    iteration_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    task_id          UUID NOT NULL REFERENCES Task(task_id) ON DELETE CASCADE,
-    iteration_number INTEGER NOT NULL,
-    iteration_type   TEXT NOT NULL,
-    reasoning_text   TEXT,
-    action_taken     TEXT,
-    action_params    JSONB DEFAULT '{}',
-    observation_text TEXT,
-    observation_data JSONB DEFAULT '{}',
-    decision         TEXT,
-    decision_rationale TEXT,
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (task_id, iteration_number)
-);
-
--- ============================================================
--- 18. AgentBroadcast — cross-agent knowledge sharing
--- ============================================================
-CREATE TABLE IF NOT EXISTS AgentBroadcast (
-    broadcast_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    run_id          UUID NOT NULL REFERENCES SourcingRun(run_id) ON DELETE CASCADE,
-    discovery_type  TEXT NOT NULL,
-    content         TEXT NOT NULL,
-    discovered_by   TEXT NOT NULL,
-    consumed_by     TEXT[] DEFAULT '{}',
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
-);

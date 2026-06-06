@@ -131,7 +131,6 @@ export function registerIpcHandlers(toolBridge: ToolBridge): void {
   ipcMain.handle(IPC_CHANNELS.RESUME_RUN, async (_event, payload: { runId: string }) => {
     stateBus.emitSystemLog("info", `Resuming run: ${payload.runId}`);
     const state = await toolBridge.callTool("oculai_get_run_state", { run_id: payload.runId });
-    stateBus.emitRunState({ run: state as never, pipeline: undefined });
     return state;
   });
 
@@ -188,7 +187,7 @@ export function registerIpcHandlers(toolBridge: ToolBridge): void {
 
 /**
  * Build the initial prompt that kicks off the Oculai pipeline.
- * The Pi session reads this and begins the ReAct orchestration loop.
+ * The Pi session reads this and begins autonomous orchestration.
  */
 function buildPipelinePrompt(runId: string, payload: StartRunPayload): string {
   const skills = payload.requiredSkills?.length
@@ -207,19 +206,7 @@ Job Title: ${payload.jobTitle}
 ${payload.jdText}
 ${skills}${domains}
 
-### Instructions
-1. You have already called oculai_create_run — the run is ready at run_id="${runId}".
-2. Now proceed with the full Oculai pipeline:
-   - Call oculai_list_source_capabilities to see available sources
-   - Analyze the JD and design a search strategy with 2-4 talent profiles
-   - Each profile should have at least 2 source hypotheses
-   - At least 2 profiles must target Chinese platforms
-   - Create a plan via oculai_checkpoint_plan
-   - Execute search across sources (China-first priority)
-   - Upsert candidates as you find them
-   - Share terminology discoveries via oculai_broadcast_discovery
-   - Resolve identities, enrich profiles, evaluate, audit
-   - Export the final report
-
-Begin by analyzing the JD and listing your search hypotheses.`;
+The run has been created (run_id="${runId}"). Begin orchestrating the talent sourcing pipeline.
+Analyze the JD, design your search strategy, spawn subagents as needed, and find the best
+China-based candidates for this role.`;
 }

@@ -126,12 +126,3 @@ ALTER TABLE SearchQueryLog
     ADD CONSTRAINT fk_sql_run FOREIGN KEY (run_id)
         REFERENCES SourcingRun (run_id) ON DELETE SET NULL;
 
--- TaskIteration → Task
-ALTER TABLE TaskIteration
-    ADD CONSTRAINT fk_iteration_task FOREIGN KEY (task_id)
-        REFERENCES Task (task_id) ON DELETE CASCADE;
-
--- AgentBroadcast → SourcingRun
-ALTER TABLE AgentBroadcast
-    ADD CONSTRAINT fk_broadcast_run FOREIGN KEY (run_id)
-        REFERENCES SourcingRun (run_id) ON DELETE CASCADE;

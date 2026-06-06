@@ -1,6 +1,6 @@
 {
   "name": "oculai-desktop",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Oculai Talent Sourcing Desktop - Multi-Agent Talent Sourcing System",
   "main": "dist/main/main/index.js",
   "type": "module",
