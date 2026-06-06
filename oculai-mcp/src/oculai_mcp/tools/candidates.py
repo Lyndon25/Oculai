@@ -4,8 +4,15 @@ import re
 from typing import Any
 from uuid import UUID, uuid4
 
+import asyncpg
+
 from oculai_mcp.db import identities, runs
 from oculai_mcp.db.client import execute_with_retry, fetch_with_retry, fetchrow_with_retry, fetchval_with_retry, get_db_pool
+from oculai_mcp.tools.errors import (
+    ConflictError,
+    InternalError,
+    ValidationError,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +130,15 @@ def _has_minimum_signal(person_data: dict[str, Any]) -> tuple[bool, str]:
     )
 
 
+# ---------------------------------------------------------------------------
+# Rejection helpers — structured entries for batch rejection tracking
+# ---------------------------------------------------------------------------
+
+def _rejection(name: str, reason: str, gate: str) -> dict[str, str]:
+    """Build a structured rejection entry for batch upsert tracking."""
+    return {"name": name, "action": "rejected", "reason": reason, "gate": gate}
+
+
 async def upsert_candidate(
     run_id: UUID,
     person_data: dict[str, Any],
@@ -143,25 +159,19 @@ async def upsert_candidate(
     # --- Gate 1: result_type filter ---
     result_type = person_data.get("result_type", "unknown")
     if result_type == "job_posting":
-        return {
-            "person_id": None,
-            "record_id": None,
-            "match_type": "rejected",
-            "action": "rejected",
-            "reason": "result_type='job_posting' is not a person — DISCARD per Decision Matrix",
-        }
+        raise ValidationError(
+            "result_type='job_posting' is not a person — DISCARD per Decision Matrix",
+            details={"result_type": "job_posting", "gate": "result_type_filter"},
+        )
 
     # --- Gate 2: name validation ---
     name = person_data.get("name", "")
     name_ok, name_reason = _is_reasonable_person_name(name)
     if not name_ok:
-        return {
-            "person_id": None,
-            "record_id": None,
-            "match_type": "rejected",
-            "action": "rejected",
-            "reason": f"INVALID_NAME: {name_reason}",
-        }
+        raise ValidationError(
+            f"INVALID_NAME: {name_reason}",
+            details={"name": name, "reason": name_reason, "gate": "name_validation"},
+        )
 
     # --- Gate 2.5: China-First signal check (soft) ---
     from oculai_mcp.utils.chinese_names import has_china_affiliation
@@ -226,77 +236,83 @@ async def upsert_candidate(
     if not is_existing:
         signal_ok, signal_reason = _has_minimum_signal(person_data)
         if not signal_ok:
-            return {
-                "person_id": None,
-                "record_id": None,
-                "match_type": "rejected",
-                "action": "rejected",
-                "reason": f"MINIMUM_SIGNAL_REQUIRED: {signal_reason}",
-            }
+            raise ValidationError(
+                f"MINIMUM_SIGNAL_REQUIRED: {signal_reason}",
+                details={"name": name, "reason": signal_reason, "gate": "minimum_signal"},
+            )
 
     # --- Proceed with upsert ---
     institution = person_data.get("institution")
 
-    if not is_existing:
-        # Create new Person (already validated above)
-        person_id = uuid4()
-        aliases = person_data.get("aliases")
-        position = person_data.get("position") or person_data.get("job_title")
-        pool_tags = person_data.get("pool_tags")
-        await execute_with_retry(
-            """
-            INSERT INTO person (person_id, canonical_name, aliases, latest_institution,
-                latest_position, total_papers, h_index, total_citations,
-                orcid, google_scholar_id, github_id, linkedin_url,
-                pool_tags, created_by_agent, updated_by_agent)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14)
-            """,
-            person_id, name, aliases, institution,
-            position,
-            person_data.get("paper_count", 0),
-            person_data.get("h_index", 0),
-            person_data.get("citation_count", 0),
-            external_ids["orcid"], external_ids["google_scholar"],
-            external_ids["github"], external_ids["linkedin"],
-            pool_tags,
-            agent_id,
+    try:
+        if not is_existing:
+            # Create new Person (already validated above)
+            person_id = uuid4()
+            aliases = person_data.get("aliases")
+            position = person_data.get("position") or person_data.get("job_title")
+            pool_tags = person_data.get("pool_tags")
+            await execute_with_retry(
+                """
+                INSERT INTO person (person_id, canonical_name, aliases, latest_institution,
+                    latest_position, total_papers, h_index, total_citations,
+                    orcid, google_scholar_id, github_id, linkedin_url,
+                    pool_tags, created_by_agent, updated_by_agent)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14)
+                """,
+                person_id, name, aliases, institution,
+                position,
+                person_data.get("paper_count", 0),
+                person_data.get("h_index", 0),
+                person_data.get("citation_count", 0),
+                external_ids["orcid"], external_ids["google_scholar"],
+                external_ids["github"], external_ids["linkedin"],
+                pool_tags,
+                agent_id,
+            )
+            match_type = "new"
+
+            # Link external identities
+            for source_type, ext_id in external_ids.items():
+                if ext_id:
+                    await identities.link_person_identity(
+                        person_id, source_type, ext_id,
+                        verified_by_agent=agent_id,
+                    )
+        else:
+            # Merge data into existing Person
+            await identities.merge_person_data(person_id, person_data, agent_id)
+
+        # Create CandidateRecord with rich extraction metadata
+        raw_data = {
+            "source": source_name,
+            "original": person_data,
+            "extraction": {
+                "result_type": person_data.get("result_type", "unknown"),
+                "confidence": person_data.get("confidence", "medium"),
+                "extraction_method": person_data.get("extraction_method", "direct"),
+                "verified_by": agent_id,
+            },
+        }
+        record_id = await runs.create_candidate_record(
+            run_id, person_id,
+            raw_data=raw_data,
+            created_by_agent=agent_id,
         )
-        match_type = "new"
 
-        # Link external identities
-        for source_type, ext_id in external_ids.items():
-            if ext_id:
-                await identities.link_person_identity(
-                    person_id, source_type, ext_id,
-                    verified_by_agent=agent_id,
-                )
-    else:
-        # Merge data into existing Person
-        await identities.merge_person_data(person_id, person_data, agent_id)
-
-    # Create CandidateRecord with rich extraction metadata
-    raw_data = {
-        "source": source_name,
-        "original": person_data,
-        "extraction": {
-            "result_type": person_data.get("result_type", "unknown"),
-            "confidence": person_data.get("confidence", "medium"),
-            "extraction_method": person_data.get("extraction_method", "direct"),
-            "verified_by": agent_id,
-        },
-    }
-    record_id = await runs.create_candidate_record(
-        run_id, person_id,
-        raw_data=raw_data,
-        created_by_agent=agent_id,
-    )
-
-    return {
-        "person_id": str(person_id),
-        "record_id": str(record_id) if record_id else None,
-        "match_type": match_type,
-        "action": "merged" if match_type != "new" else "created",
-    }
+        return {
+            "person_id": str(person_id),
+            "record_id": str(record_id) if record_id else None,
+            "match_type": match_type,
+            "action": "merged" if match_type != "new" else "created",
+        }
+    except (asyncpg.CheckViolationError, asyncpg.NotNullViolationError) as e:
+        raise ValidationError(str(e), details={"db_error": type(e).__name__}) from e
+    except asyncpg.UniqueViolationError as e:
+        raise ConflictError(str(e), details={"db_error": type(e).__name__}) from e
+    except asyncpg.ForeignKeyViolationError as e:
+        raise ValidationError(str(e), details={"db_error": type(e).__name__}) from e
+    except asyncpg.PostgresError as e:
+        raise InternalError(str(e), details={"db_error": type(e).__name__}) from e
 
 
 async def _resolve_identity(conn, person_data: dict[str, Any]) -> tuple[UUID | None, str]:
@@ -350,150 +366,169 @@ async def upsert_candidates_batch(
     rejected: list[dict[str, Any]] = []
 
     pool = await get_db_pool()
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            for person_data in candidates_list:
-                name = person_data.get("name", "")
-                result_type = person_data.get("result_type", "unknown")
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                for person_data in candidates_list:
+                    name = person_data.get("name", "")
+                    result_type = person_data.get("result_type", "unknown")
 
-                # Gate 1: job posting
-                if result_type == "job_posting":
-                    rejected.append({
-                        "name": name, "action": "rejected",
-                        "reason": "result_type='job_posting' is not a person",
-                    })
-                    continue
-
-                # Gate 2: name validation
-                name_ok, name_reason = _is_reasonable_person_name(name)
-                if not name_ok:
-                    rejected.append({
-                        "name": name, "action": "rejected",
-                        "reason": f"INVALID_NAME: {name_reason}",
-                    })
-                    continue
-
-                # Gate 3: identity resolution
-                person_id, match_type = await _resolve_identity(conn, person_data)
-                is_existing = person_id is not None
-
-                # Gate 4: minimum signal for new persons
-                if not is_existing:
-                    signal_ok, signal_reason = _has_minimum_signal(person_data)
-                    if not signal_ok:
-                        rejected.append({
-                            "name": name, "action": "rejected",
-                            "reason": f"MINIMUM_SIGNAL_REQUIRED: {signal_reason}",
-                        })
+                    # Gate 1: job posting
+                    if result_type == "job_posting":
+                        rejected.append(_rejection(
+                            name, "result_type='job_posting' is not a person",
+                            gate="result_type_filter",
+                        ))
                         continue
 
-                # Proceed with upsert
-                institution = person_data.get("institution")
-                external_ids = {
-                    "orcid": person_data.get("orcid"),
-                    "google_scholar": person_data.get("google_scholar_id"),
-                    "github": person_data.get("github_id"),
-                    "linkedin": person_data.get("linkedin_url"),
-                    "dblp": person_data.get("dblp_key"),
-                }
+                    # Gate 2: name validation
+                    name_ok, name_reason = _is_reasonable_person_name(name)
+                    if not name_ok:
+                        rejected.append(_rejection(
+                            name, f"INVALID_NAME: {name_reason}",
+                            gate="name_validation",
+                        ))
+                        continue
 
-                if not is_existing:
-                    person_id = uuid4()
-                    aliases = person_data.get("aliases")
-                    position = person_data.get("position") or person_data.get("job_title")
-                    pool_tags = person_data.get("pool_tags")
-                    await conn.execute(
-                        """
-                        INSERT INTO person (person_id, canonical_name, aliases, latest_institution,
-                            latest_position, total_papers, h_index, total_citations,
-                            orcid, google_scholar_id, github_id, linkedin_url,
-                            pool_tags, created_by_agent, updated_by_agent)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14)
-                        """,
-                        person_id, name, aliases, institution, position,
-                        person_data.get("paper_count", 0),
-                        person_data.get("h_index", 0),
-                        person_data.get("citation_count", 0),
-                        external_ids["orcid"], external_ids["google_scholar"],
-                        external_ids["github"], external_ids["linkedin"],
-                        pool_tags, agent_id,
-                    )
-                    match_type = "new"
-                    for st, eid in external_ids.items():
-                        if eid:
+                    # Gate 3: identity resolution
+                    person_id, match_type = await _resolve_identity(conn, person_data)
+                    is_existing = person_id is not None
+
+                    # Gate 4: minimum signal for new persons
+                    if not is_existing:
+                        signal_ok, signal_reason = _has_minimum_signal(person_data)
+                        if not signal_ok:
+                            rejected.append(_rejection(
+                                name, f"MINIMUM_SIGNAL_REQUIRED: {signal_reason}",
+                                gate="minimum_signal",
+                            ))
+                            continue
+
+                    # Proceed with upsert
+                    try:
+                        institution = person_data.get("institution")
+                        external_ids = {
+                            "orcid": person_data.get("orcid"),
+                            "google_scholar": person_data.get("google_scholar_id"),
+                            "github": person_data.get("github_id"),
+                            "linkedin": person_data.get("linkedin_url"),
+                            "dblp": person_data.get("dblp_key"),
+                        }
+
+                        if not is_existing:
+                            person_id = uuid4()
+                            aliases = person_data.get("aliases")
+                            position = person_data.get("position") or person_data.get("job_title")
+                            pool_tags = person_data.get("pool_tags")
                             await conn.execute(
                                 """
-                                INSERT INTO personexternalidentity
-                                    (identity_id, person_id, source_type, external_id, external_url, confidence, verified_by_agent)
-                                VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)
-                                ON CONFLICT (source_type, external_id) DO NOTHING
+                                INSERT INTO person (person_id, canonical_name, aliases, latest_institution,
+                                    latest_position, total_papers, h_index, total_citations,
+                                    orcid, google_scholar_id, github_id, linkedin_url,
+                                    pool_tags, created_by_agent, updated_by_agent)
+                                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14)
                                 """,
-                                person_id, st, eid, None, 1.0, agent_id,
+                                person_id, name, aliases, institution, position,
+                                person_data.get("paper_count", 0),
+                                person_data.get("h_index", 0),
+                                person_data.get("citation_count", 0),
+                                external_ids["orcid"], external_ids["google_scholar"],
+                                external_ids["github"], external_ids["linkedin"],
+                                pool_tags, agent_id,
                             )
-                else:
-                    # Merge data into existing Person (stored procedure)
-                    await conn.execute(
-                        "SELECT merge_person_data($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-                        person_id, institution,
-                        person_data.get("paper_count"),
-                        person_data.get("h_index"),
-                        person_data.get("citation_count"),
-                        external_ids["orcid"],
-                        external_ids["google_scholar"],
-                        external_ids["github"],
-                        external_ids["linkedin"],
-                        agent_id,
-                    )
-                    aliases = person_data.get("aliases")
-                    position = person_data.get("position") or person_data.get("job_title")
-                    pool_tags = person_data.get("pool_tags")
-                    if aliases is not None or position is not None or pool_tags is not None:
-                        await conn.execute(
-                            """
-                            UPDATE person
-                            SET aliases = COALESCE(aliases, $2),
-                                latest_position = COALESCE(latest_position, $3),
-                                pool_tags = COALESCE(pool_tags, $4),
-                                updated_at = now(),
-                                updated_by_agent = $5,
-                                data_version = data_version + 1
-                            WHERE person_id = $1
-                            """,
-                            person_id, aliases, position, pool_tags, agent_id,
+                            match_type = "new"
+                            for st, eid in external_ids.items():
+                                if eid:
+                                    await conn.execute(
+                                        """
+                                        INSERT INTO personexternalidentity
+                                            (identity_id, person_id, source_type, external_id, external_url, confidence, verified_by_agent)
+                                        VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)
+                                        ON CONFLICT (source_type, external_id) DO NOTHING
+                                        """,
+                                        person_id, st, eid, None, 1.0, agent_id,
+                                    )
+                        else:
+                            # Merge data into existing Person (stored procedure)
+                            await conn.execute(
+                                "SELECT merge_person_data($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+                                person_id, institution,
+                                person_data.get("paper_count"),
+                                person_data.get("h_index"),
+                                person_data.get("citation_count"),
+                                external_ids["orcid"],
+                                external_ids["google_scholar"],
+                                external_ids["github"],
+                                external_ids["linkedin"],
+                                agent_id,
+                            )
+                            aliases = person_data.get("aliases")
+                            position = person_data.get("position") or person_data.get("job_title")
+                            pool_tags = person_data.get("pool_tags")
+                            if aliases is not None or position is not None or pool_tags is not None:
+                                await conn.execute(
+                                    """
+                                    UPDATE person
+                                    SET aliases = COALESCE(aliases, $2),
+                                        latest_position = COALESCE(latest_position, $3),
+                                        pool_tags = COALESCE(pool_tags, $4),
+                                        updated_at = now(),
+                                        updated_by_agent = $5,
+                                        data_version = data_version + 1
+                                    WHERE person_id = $1
+                                    """,
+                                    person_id, aliases, position, pool_tags, agent_id,
+                                )
+
+                        # Create CandidateRecord
+                        raw_data = {
+                            "source": source_name,
+                            "original": person_data,
+                            "extraction": {
+                                "result_type": person_data.get("result_type", "unknown"),
+                                "confidence": person_data.get("confidence", "medium"),
+                                "extraction_method": person_data.get("extraction_method", "direct"),
+                                "verified_by": agent_id,
+                            },
+                        }
+                        record_row = await conn.fetchrow(
+                            """INSERT INTO candidaterecord (record_id, run_id, person_id, raw_data, created_by_agent, updated_by_agent)
+                               VALUES (gen_random_uuid(), $1, $2, $3, $4, $4)
+                               ON CONFLICT (run_id, person_id) DO NOTHING RETURNING record_id""",
+                            run_id, person_id, raw_data, agent_id,
                         )
+                        record_id = record_row["record_id"] if record_row else None
+                        if record_id is None:
+                            existing = await conn.fetchrow(
+                                "SELECT record_id FROM candidaterecord WHERE run_id = $1 AND person_id = $2",
+                                run_id, person_id,
+                            )
+                            record_id = existing["record_id"] if existing else None
 
-                # Create CandidateRecord
-                raw_data = {
-                    "source": source_name,
-                    "original": person_data,
-                    "extraction": {
-                        "result_type": person_data.get("result_type", "unknown"),
-                        "confidence": person_data.get("confidence", "medium"),
-                        "extraction_method": person_data.get("extraction_method", "direct"),
-                        "verified_by": agent_id,
-                    },
-                }
-                record_row = await conn.fetchrow(
-                    """INSERT INTO candidaterecord (record_id, run_id, person_id, raw_data, created_by_agent, updated_by_agent)
-                       VALUES (gen_random_uuid(), $1, $2, $3, $4, $4)
-                       ON CONFLICT (run_id, person_id) DO NOTHING RETURNING record_id""",
-                    run_id, person_id, raw_data, agent_id,
-                )
-                record_id = record_row["record_id"] if record_row else None
-                if record_id is None:
-                    existing = await conn.fetchrow(
-                        "SELECT record_id FROM candidaterecord WHERE run_id = $1 AND person_id = $2",
-                        run_id, person_id,
-                    )
-                    record_id = existing["record_id"] if existing else None
-
-                accepted.append({
-                    "person_id": str(person_id),
-                    "record_id": str(record_id) if record_id else None,
-                    "match_type": match_type,
-                    "action": "merged" if match_type != "new" else "created",
-                    "name": name,
-                })
+                        accepted.append({
+                            "person_id": str(person_id),
+                            "record_id": str(record_id) if record_id else None,
+                            "match_type": match_type,
+                            "action": "merged" if match_type != "new" else "created",
+                            "name": name,
+                        })
+                    except (asyncpg.CheckViolationError, asyncpg.NotNullViolationError,
+                            asyncpg.ForeignKeyViolationError) as e:
+                        rejected.append(_rejection(
+                            name, f"DB_VALIDATION: {e}", gate="db_constraint",
+                        ))
+                    except asyncpg.UniqueViolationError as e:
+                        rejected.append(_rejection(
+                            name, f"DB_CONFLICT: {e}", gate="db_unique",
+                        ))
+    except (asyncpg.CheckViolationError, asyncpg.NotNullViolationError) as e:
+        raise ValidationError(str(e), details={"db_error": type(e).__name__}) from e
+    except asyncpg.UniqueViolationError as e:
+        raise ConflictError(str(e), details={"db_error": type(e).__name__}) from e
+    except asyncpg.ForeignKeyViolationError as e:
+        raise ValidationError(str(e), details={"db_error": type(e).__name__}) from e
+    except asyncpg.PostgresError as e:
+        raise InternalError(str(e), details={"db_error": type(e).__name__}) from e
 
     return {
         "accepted": accepted,

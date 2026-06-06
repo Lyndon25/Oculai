@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     source_enable_juejin: bool = True
     source_enable_zhihu: bool = True
     source_enable_csdn: bool = True
+    source_enable_duckduckgo: bool = True
 
     model_config = SettingsConfigDict(
         env_file=str(_ENV_FILE_PATH), env_file_encoding="utf-8"

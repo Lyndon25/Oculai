@@ -1,0 +1,112 @@
+name: Oculai CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  # ── Schema Drift Check ──────────────────────────────────────────────
+  schema-check:
+    name: "Schema Drift Check"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check schema consistency
+        run: python scripts/check_schema_drift.py
+      - name: Check TypeScript is up-to-date
+        run: |
+          python scripts/generate_pi_tools.py
+          if ! git diff --exit-code oculai-desktop/src/main/generated-tools.ts; then
+            echo "ERROR: generated-tools.ts is out of date. Run: python scripts/generate_pi_tools.py"
+            exit 1
+          fi
+
+  # ── Python Compile Check ────────────────────────────────────────────
+  python-check:
+    name: "Python Compile & Lint"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          cd oculai-mcp
+          pip install -e .
+      - name: Compile-check all Python modules
+        run: |
+          cd oculai-mcp
+          python -c "
+          import py_compile
+          from pathlib import Path
+          errors = []
+          for f in Path('src/oculai_mcp').rglob('*.py'):
+              try:
+                  py_compile.compile(str(f), doraise=True)
+              except py_compile.PyCompileError as e:
+                  errors.append(str(e))
+          if errors:
+              for e in errors:
+                  print(f'FAIL: {e}')
+              exit(1)
+          print(f'OK — all modules compile')
+          "
+
+  # ── TypeScript Check ────────────────────────────────────────────────
+  typescript-check:
+    name: "TypeScript Type Check"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install & typecheck
+        run: |
+          cd oculai-desktop
+          npm ci
+          npm run typecheck
+
+  # ── DB Integration Smoke Test ───────────────────────────────────────
+  db-smoke-test:
+    name: "DB Integration Smoke Test"
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: oculai
+          POSTGRES_USER: oculai
+          POSTGRES_PASSWORD: oculai_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          cd oculai-mcp
+          pip install -e .
+      - name: Run integration smoke test
+        env:
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          DB_USER: oculai
+          DB_PASSWORD: oculai_dev
+          DB_NAME: oculai
+        run: |
+          cd oculai-mcp
+          python tests/integration_test.py

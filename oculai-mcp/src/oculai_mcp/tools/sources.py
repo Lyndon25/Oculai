@@ -7,6 +7,7 @@ from uuid import UUID
 from oculai_mcp.sources.base import SearchQuery
 from oculai_mcp.sources.registry import create_source, get_all_capabilities, list_sources as list_registered_sources
 from oculai_mcp.db.provenance import log_source_call
+from oculai_mcp.tools.errors import SourceError, ok, err
 
 
 async def list_source_capabilities() -> dict[str, Any]:
@@ -28,7 +29,7 @@ async def search_source(
 
     source = create_source(source_name)
     if source is None:
-        return {"status": "error", "error": {"code": "unknown_source", "message": f"Source '{source_name}' not found"}}
+        return err("unknown_source", f"Source '{source_name}' not found")
 
     query = SearchQuery(
         keywords=keywords,
@@ -80,19 +81,19 @@ async def search_source(
             status="failed", duration_ms=elapsed_ms, error_message=str(e),
             run_id=run_id,
         )
-        return {"status": "error", "error": {"code": "search_failed", "message": str(e), "source_name": source_name}}
+        return err("search_failed", str(e), {"source_name": source_name})
 
 
 async def fetch_source_detail(source_name: str, external_id: str) -> dict[str, Any]:
     """Fetch detailed information for a single candidate from a source."""
     source = create_source(source_name)
     if source is None:
-        return {"status": "error", "error": {"code": "unknown_source", "message": f"Source '{source_name}' not found"}}
+        return err("unknown_source", f"Source '{source_name}' not found")
 
     try:
         candidate = await source.get_detail(external_id)
         if candidate is None:
-            return {"status": "error", "error": {"code": "not_found", "message": f"No result for '{external_id}'"}}
+            return err("not_found", f"No result for '{external_id}'")
 
         return {
             "status": "success",
@@ -111,4 +112,4 @@ async def fetch_source_detail(source_name: str, external_id: str) -> dict[str, A
             },
         }
     except Exception as e:
-        return {"status": "error", "error": {"code": "detail_failed", "message": str(e), "source_name": source_name}}
+        return err("detail_failed", str(e), {"source_name": source_name})

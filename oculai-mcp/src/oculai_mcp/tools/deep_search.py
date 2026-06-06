@@ -11,8 +11,10 @@ from typing import Any
 from uuid import UUID
 
 from oculai_mcp.db import search_state
+from oculai_mcp.db.client import fetch_with_retry
 from oculai_mcp.tools import candidates as candidates_tool
 from oculai_mcp.tools.sources import search_source
+from oculai_mcp.tools.site_crawler import crawl_site
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,7 @@ _DEFAULT_CONFIG = {
         "zhihu": 20,
         "baidu_scholar": 20,
         "baidu": 20,
+        "duckduckgo": 20,
         "personal_homepage": 10,
         "industry": 10,
         "conference": 10,
@@ -45,6 +48,12 @@ _DEFAULT_CONFIG = {
     "probe_rounds_per_combo": 2,
     "max_concurrent_sources": 4,
     "batch_upsert_interval": 10,  # upsert every N search calls
+    # Site crawl enrichment (Phase 5.5)
+    "site_crawl_enabled": False,
+    "site_crawl_max_candidates": 5,
+    "site_crawl_max_pages": 10,
+    "site_crawl_max_depth": 2,
+    "site_crawl_min_quality_score": 0,
 }
 
 # China-first source weights for initial budget allocation
@@ -55,6 +64,7 @@ _SOURCE_PRIORITY_WEIGHTS = {
     "csdn": 1.3,
     "baidu": 1.2,
     "github": 1.1,
+    "duckduckgo": 1.0,
     "openalex": 1.0,
     "arxiv": 1.0,
     "semantic_scholar": 0.9,
@@ -609,6 +619,11 @@ async def deep_search(
             all_results.extend([r for r in gap_raw if isinstance(r, dict)])
 
     # ================================================================
+    # Phase 5.5: Site Enrichment (optional)
+    # ================================================================
+    site_crawl_summary = await _enrich_with_site_crawl(run_id, cfg, global_state)
+
+    # ================================================================
     # Phase 6: Terminate & Summary
     # ================================================================
     total_time = time.monotonic() - start_time
@@ -655,6 +670,7 @@ async def deep_search(
         "hypotheses_tested": len(hypotheses),
         "sources_used": len(source_summary),
         "gaps_detected": len(gaps),
+        "site_crawl": site_crawl_summary,
         "per_source": [
             {
                 "source_name": sn,
@@ -667,6 +683,112 @@ async def deep_search(
             )
         ],
         "gaps": gaps,
+    }
+
+
+async def _enrich_with_site_crawl(
+    run_id: UUID,
+    config: dict[str, Any],
+    global_state: dict[str, Any],
+) -> dict[str, Any]:
+    """Optional Phase 5.5: Crawl personal websites of top candidates.
+
+    Queries the database for candidates in this run with profile URLs,
+    selects the top-N by quality score, and performs BFS site crawling
+    to discover hidden projects, publications, and background info.
+
+    Returns a summary of crawl results.
+    """
+    if not config.get("site_crawl_enabled", False):
+        return {"enabled": False, "pages_crawled": 0}
+
+    max_candidates = config.get("site_crawl_max_candidates", 5)
+    min_quality = config.get("site_crawl_min_quality_score", 0)
+
+    try:
+        rows = await fetch_with_retry(
+            """
+            SELECT cr.person_id, cr.raw_data, cr.quality_score, p.canonical_name
+            FROM candidaterecord cr
+            JOIN person p ON cr.person_id = p.person_id
+            WHERE cr.run_id = $1
+              AND cr.raw_data IS NOT NULL
+              AND cr.quality_score >= $2
+            ORDER BY cr.quality_score DESC, cr.created_at DESC
+            LIMIT $3
+            """,
+            run_id, min_quality, max_candidates,
+        )
+    except Exception as e:
+        logger.warning("Failed to query candidates for site crawl: %s", e)
+        return {"enabled": True, "error": str(e), "pages_crawled": 0}
+
+    # Extract profile URLs that look like personal homepages
+    homepage_patterns = [
+        ".edu", "github.io", "scholar.google", "researchgate",
+        "linkedin.com/in", "dblp.org/pid", "orcid.org",
+        ".ac.cn", ".edu.cn",
+    ]
+
+    crawl_targets: list[tuple[UUID, str, str]] = []  # (person_id, name, url)
+    for row in rows:
+        raw = row.get("raw_data", {}) or {}
+        original = raw.get("original", {})
+        url = original.get("profile_url", "")
+        if not url:
+            continue
+        url_lower = url.lower()
+        if any(pat in url_lower for pat in homepage_patterns):
+            crawl_targets.append((row["person_id"], row["canonical_name"], url))
+
+    if not crawl_targets:
+        return {"enabled": True, "pages_crawled": 0, "reason": "no_homepage_urls_found"}
+
+    # Check time budget
+    elapsed_min = (time.monotonic() - global_state["start_time"]) / 60
+    remaining_min = config["max_duration_minutes"] - elapsed_min
+    if remaining_min < 2:
+        return {"enabled": True, "pages_crawled": 0, "reason": "insufficient_time_budget"}
+
+    logger.info("Site crawl enrichment: %d candidates, %d targets", len(rows), len(crawl_targets))
+
+    results = []
+    for person_id, name, url in crawl_targets:
+        try:
+            crawl_result = await crawl_site(
+                start_url=url,
+                max_pages=config.get("site_crawl_max_pages", 10),
+                max_depth=config.get("site_crawl_max_depth", 2),
+                same_domain_only=True,
+                run_id=run_id,
+                enable_dynamic=True,
+            )
+            if crawl_result.get("status") == "success":
+                results.append({
+                    "person_id": str(person_id),
+                    "name": name,
+                    "url": url,
+                    "pages_crawled": crawl_result.get("pages_crawled", 0),
+                    "combined_text_length": len(crawl_result.get("combined_text", "")),
+                })
+        except Exception as e:
+            logger.warning("Site crawl failed for %s (%s): %s", name, url, e)
+            results.append({
+                "person_id": str(person_id),
+                "name": name,
+                "url": url,
+                "error": str(e),
+            })
+
+        # Small delay between candidates
+        await asyncio.sleep(0.5)
+
+    total_pages = sum(r.get("pages_crawled", 0) for r in results if "pages_crawled" in r)
+    return {
+        "enabled": True,
+        "candidates_crawled": len(crawl_targets),
+        "pages_crawled": total_pages,
+        "results": results,
     }
 
 

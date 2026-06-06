@@ -10,12 +10,26 @@ Oculai is a **multi-Agent collaborative talent sourcing system** for **Chinese c
 
 ## Architecture Principle
 
+The system has two deployment modes:
+
+**Mode A: Claude Code MCP (CLI)**
 ```
 Claude Code (decides everything)
-    ↕ stdio MCP
+    ↕ stdio MCP (JSON-RPC)
 FastMCP Server (deterministic tools only)
     ↕ asyncpg
 PostgreSQL 16 + pgvector (single source of truth)
+```
+
+**Mode B: Electron Desktop App**
+```
+Oculai Desktop (Electron + React)
+    └── Electron Main Process
+        ├── embedded PostgreSQL (PostgresManager, port 15432)
+        ├── Python sidecar (jsonl_server.py, child_process.spawn)
+        │   └── JSONL protocol over stdin/stdout
+        └── Pi AI AgentSession (pi-coding-agent SDK)
+            └── 41 Oculai tools registered as Pi extension tools
 ```
 
 - Main Agent reads `oculai/skills/oculai-talent-sourcing/SKILL.md` for the orchestration protocol
@@ -24,6 +38,7 @@ PostgreSQL 16 + pgvector (single source of truth)
 - Workflows are DAG-based: Plan → Task (free-form TEXT type) → TaskDependency
 - Concurrent task claiming uses PostgreSQL `FOR UPDATE SKIP LOCKED`
 - ReAct iteration logs and cross-agent discovery broadcasts are persisted for auditability and resume
+- The desktop app bundles all resources (schema, agents, skills, commands) under `oculai-desktop/resources/`
 
 ## Common Commands
 
@@ -51,7 +66,7 @@ cd oculai-mcp && pip install -e .
 cd oculai-mcp && pip install -e ".[dev]"
 
 # Optional source/browser extras
-cd oculai-mcp && pip install -e ".[playwright,baidu]" && python -m playwright install chromium
+cd oculai-mcp && pip install -e ".[playwright,baidu,duckduckgo]" && python -m playwright install chromium
 
 # Run via fastmcp (for Claude Code integration)
 cd oculai-mcp && fastmcp run src/oculai_mcp/server.py
@@ -59,6 +74,31 @@ cd oculai-mcp && fastmcp run src/oculai_mcp/server.py
 # Dev mode (MCP Inspector at localhost:5173)
 cd oculai-mcp && fastmcp dev src/oculai_mcp/server.py
 ```
+
+### Desktop App (Electron)
+```bash
+# Install dependencies
+cd oculai-desktop && npm install
+
+# Dev mode (Vite HMR + Electron)
+cd oculai-desktop && npm run dev
+
+# Type check
+cd oculai-desktop && npm run typecheck
+
+# Production build
+cd oculai-desktop && npm run build
+```
+
+The Electron app embeds its own PostgreSQL (via `postgres-manager.ts`) and spawns the Python JSONL server as a child process. It does NOT require Docker.
+
+### JSONL Server (Python Sidecar)
+```bash
+# Run the JSONL server directly (used by Electron app, not Claude Code)
+cd oculai-mcp && python -m oculai_mcp.jsonl_server
+```
+
+The JSONL server reads tool calls from stdin (one JSON object per line) and writes responses to stdout. Stderr carries system/status messages. This is the protocol the Electron main process uses to call Oculai tools without MCP JSON-RPC framing. See `jsonl_server.py` and `tool_registry.py`.
 
 ### Tests / Checks
 ```bash
@@ -100,6 +140,25 @@ Current tool groups include run lifecycle, planning/tasks, ReAct iterations, cro
 To add a new tool:
 1. Implement the logic in `src/oculai_mcp/tools/` or `src/oculai_mcp/db/`
 2. Register a `@mcp.tool` wrapper in `server.py`
+3. Add the handler function to `tool_registry.py` and add its name to the `TOOL_REGISTRY` dict
+4. If the tool needs desktop-app access, also add its schema to `OCULAI_TOOLS` in `oculai-desktop/src/main/pi-session.ts`
+
+### Tool Registry & JSONL Server
+`tool_registry.py` extracts all 41 `@mcp.tool` functions into a flat `TOOL_REGISTRY` dict (`dict[str, Callable]`) where each handler accepts a plain `params: dict` and returns `dict`. This decouples the tools from FastMCP's decorator-based registration, enabling:
+
+- **JSONL server** (`jsonl_server.py`): a stdio bridge that reads JSONL requests from stdin, dispatches to `TOOL_REGISTRY`, and writes JSONL responses to stdout. Used by the Electron desktop app's `ToolBridge` (`oculai-desktop/src/main/tool-bridge.ts`) which spawns the Python process as a sidecar.
+- **Pi extension registration**: the Electron main process registers all 41 tools as Pi extension tools that delegate to the JSONL bridge.
+
+Protocol format:
+```
+→ {"id": "req-1", "method": "oculai_create_run", "params": {"job_title": "...", "jd_text": "..."}}
+← {"id": "req-1", "ok": true, "result": {"run_id": "...", "status": "draft"}}
+```
+
+### Site Crawler & HTML Denoising
+`tools/site_crawler.py` provides BFS-based multi-page website crawling for deep candidate evidence discovery (personal homepages, lab pages, portfolios). `utils/html_denoise.py` converts raw HTML to clean Markdown ("fit_markdown"), removing navigation, ads, sidebars, and scripts — inspired by crawl4ai. The denoiser auto-detects JavaScript-heavy SPAs and falls back to Playwright rendering when needed.
+
+New tool: `oculai_crawl_site(start_url, max_pages, max_depth, same_domain_only)` → per-page Markdown, link graph, combined summary.
 
 ### Source connectors
 Sources follow the `IDataSource` ABC (`sources/base.py`):
@@ -130,6 +189,7 @@ Sources auto-register in `sources/registry.py` on import. Adding a new source re
 | juejin (掘金) | None | Public API (api.juejin.cn), user search + profile, Chinese dev community |
 | zhihu (知乎) | None | Public API (zhihu.com/api/v4), people search + profile, may need browser UA |
 | csdn (中国开发者网络) | None | Search API + profile HTML scraping, technical blog platform |
+| duckduckgo | None | Free web search, no API key required (`pip install duckduckgo-search`). Name extraction from titles/snippets. |
 | web_search (tool) | `TAVILY_API_KEY` or `EXA_API_KEY` | Not a source; MCP tool in `tools/web_search.py` |
 
 ### Database migrations
@@ -245,6 +305,51 @@ Before starting a test run:
 - [ ] New JD is drafted and saved to `temp/test/<NNN>-<name>/jd.md`
 - [ ] Test round directory is created with `artifacts/` subdirectory
 
+## Electron Desktop App Architecture
+
+The `oculai-desktop/` directory is a standalone Electron application that packages the entire Oculai pipeline into a desktop GUI.
+
+### Startup Lifecycle
+1. `Electron main process` creates a BrowserWindow
+2. `PostgresManager` initializes an embedded PostgreSQL instance (port 15432)
+3. `ToolBridge` spawns the Python JSONL server (`jsonl_server.py`) as a child process
+4. `Pi AgentSession` is created via `@earendil-works/pi-coding-agent` SDK
+5. All 41 Oculai tools are registered as Pi extension tools — each delegates to the Python sidecar via ToolBridge
+6. IPC handlers are registered for renderer↔main communication
+7. Renderer loads (Vite dev server in dev, bundled HTML in production)
+
+### Key Main-Process Modules
+| Module | Role |
+|---|---|
+| `postgres-manager.ts` | Manages embedded PostgreSQL lifecycle (init, start, stop). Uses `pg_ctl` to manage a local data directory under the app's userData path. |
+| `tool-bridge.ts` | Spawns and communicates with the Python JSONL server via `child_process.spawn`. Sends JSONL requests, parses JSONL responses. |
+| `pi-session.ts` | Creates and manages a Pi `AgentSession` with Oculai tools registered as extension tools. Subscribes to agent events (thinking, text, tool calls) and forwards them to the renderer via `state-bus.ts`. |
+| `state-bus.ts` | Event emitter that decouples main-process subsystems and bridges to IPC for the renderer. |
+| `ipc-handlers.ts` | Registers all `ipcMain.handle` listeners for renderer-initiated actions (start run, get state, export report, etc.). |
+| `settings-store.ts` | Persistent settings via `electron-store` (API keys, LLM provider/model, thinking level). |
+
+### Renderer (React)
+- 7 tabs: Dashboard, Pipeline, Candidates, Evidence, Report, Logs, Settings
+- State management via Zustand (`store/index.ts`)
+- Real-time streaming of agent thinking/messages/tool calls via IPC events
+- Charts via Recharts, UI components with Tailwind CSS
+
+### IPC Channel Design
+Typed IPC channels in `src/shared/ipc-channels.ts` split into:
+- **Run lifecycle**: `run:create`, `run:state`, `run:error`
+- **Pipeline streaming**: `pipeline:update`, `task:updated`, `iteration:recorded`
+- **Agent streaming**: `agent:thinking`, `agent:message`, `agent:tool_call`, `agent:tool_result`
+- **System**: `system:status`, `system:log`
+- **Actions** (renderer→main): `action:startRun`, `action:resumeRun`, `action:abortRun`, `action:exportReport`
+
+### Build & Package
+- `vite build` for renderer, `tsc -p tsconfig.main.json` for main process
+- `electron-builder` produces NSIS installer (Windows), DMG (macOS), AppImage (Linux)
+- Schema SQL, agent prompts, skill definition, and slash commands are bundled as `extraResources`
+
+### Pi Runtime
+`pi-windows-x64/` contains the Pi CLI runtime binary (`pi.exe`) and SDK examples. The Electron app's `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` npm packages wrap this runtime. The runtime handles LLM communication, context management, tool execution, and session persistence — Oculai provides the tools and system prompt on top.
+
 ## Directory Map
 
 | Directory | Purpose |
@@ -254,8 +359,16 @@ Before starting a test run:
 | `oculai/commands/` | 5 slash command definitions |
 | `oculai-db/` | Docker Compose, PostgreSQL config, SQL schema migrations |
 | `oculai-mcp/src/oculai_mcp/` | Python MCP server source |
-| `oculai-mcp/src/oculai_mcp/db/` | Database access layer (asyncpg, CRUD, retry logic, task iterations, broadcasts, search state) |
-| `oculai-mcp/src/oculai_mcp/tools/` | Domain tool implementations (sources, candidates, evidence, assessment, deep search, review, report, outreach) |
-| `oculai-mcp/src/oculai_mcp/sources/` | Source connectors (arXiv, DBLP, GitHub, Semantic Scholar, OpenAlex, ACL Anthology, PMLR, Baidu, homepage, Juejin, Zhihu, CSDN) |
-| `oculai-mcp/src/oculai_mcp/tools/web_search.py` | Tavily/Exa web search MCP tool (separate from source connectors) |
+| `oculai-mcp/src/oculai_mcp/db/` | Database access layer (asyncpg, CRUD, retry logic, task iterations, broadcasts, search state, quotas, provenance, lineage) |
+| `oculai-mcp/src/oculai_mcp/tools/` | Domain tool implementations (sources, candidates, evidence, evidence tiers, assessment, assessment weights, deep search, deep dive, site crawler, review orchestrator, report, outreach, browser, web search) |
+| `oculai-mcp/src/oculai_mcp/sources/` | Source connectors (arXiv, DBLP, GitHub, Semantic Scholar, OpenAlex, ACL Anthology, PMLR, Baidu, DuckDuckGo, homepage, Juejin, Zhihu, CSDN, industry, conference) |
+| `oculai-mcp/src/oculai_mcp/utils/` | Utilities (Chinese name extraction, HTML denoising/markdown conversion) |
+| `oculai-mcp/src/oculai_mcp/server.py` | FastMCP server — 41 `@mcp.tool` decorated functions |
+| `oculai-mcp/src/oculai_mcp/jsonl_server.py` | JSONL stdio bridge for Electron sidecar communication |
+| `oculai-mcp/src/oculai_mcp/tool_registry.py` | Flat `TOOL_REGISTRY` dict of all 41 tool handlers (no MCP dependency) |
 | `oculai-mcp/tests/` | MCP/database smoke test script |
+| `oculai-desktop/` | Electron desktop application (React + TypeScript + Vite + Tailwind) |
+| `oculai-desktop/src/main/` | Electron main process (PostgresManager, ToolBridge, Pi session, IPC handlers) |
+| `oculai-desktop/src/renderer/` | React UI (Dashboard, Pipeline, Candidates, Evidence, Report, Logs, Settings tabs) |
+| `oculai-desktop/resources/` | Bundled schema SQL, agent prompts, skill definition, slash commands |
+| `pi-windows-x64/` | Pi CLI runtime binary (`pi.exe`) + TypeScript SDK examples — powers the Electron app's AI agent |

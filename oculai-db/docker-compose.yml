@@ -26,7 +26,44 @@ services:
       timeout: 5s
       retries: 5
     shm_size: '256mb'
+    networks:
+      - oculai-net
+
+  # Incremental migration runner — runs after DB is healthy, applies only pending migrations
+  oculai-migrate:
+    image: python:3.11-slim
+    container_name: oculai-migrate
+    depends_on:
+      oculai-db:
+        condition: service_healthy
+    environment:
+      DB_HOST: oculai-db
+      DB_PORT: "5432"
+      DB_USER: ${DB_USER:-oculai}
+      DB_PASSWORD: ${DB_PASSWORD:-oculai_dev}
+      DB_NAME: ${DB_NAME:-oculai}
+    volumes:
+      - ./scripts:/scripts:ro
+      - ./schema/migrations:/migrations:ro
+    command: >
+      sh -c "
+        pip install -q asyncpg &&
+        python /scripts/run_migrations.py
+          --host $${DB_HOST}
+          --port $${DB_PORT}
+          --user $${DB_USER}
+          --password $${DB_PASSWORD}
+          --dbname $${DB_NAME}
+          --migrations-dir /migrations
+      "
+    networks:
+      - oculai-net
+    restart: "no"
 
 volumes:
   pgdata:
     driver: local
+
+networks:
+  oculai-net:
+    driver: bridge

@@ -3,6 +3,9 @@
 Captures web page screenshots and structured text content for evidence.
 Uses Playwright/Patchright when available, with a graceful fallback
 to httpx-based text fetching.
+
+Supports fit_markdown denoising inspired by crawl4ai — removes navigation,
+ads, sidebars, and outputs clean Markdown optimized for LLM consumption.
 """
 
 import logging
@@ -12,6 +15,7 @@ from uuid import UUID, uuid4
 import httpx
 
 from oculai_mcp.db.client import execute_with_retry
+from oculai_mcp.utils.html_denoise import html_to_fit_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +39,8 @@ async def capture_page_evidence(
 
     Modes:
     - "text": Fetch page text content (lightweight, no browser needed)
+    - "fit_markdown": Denoised Markdown — removes nav/sidebar/ads, keeps main content.
+      Optimized for LLM consumption. Inspired by crawl4ai.
     - "screenshot": Full-page screenshot via Playwright (requires playwright)
     - "full": Both text + screenshot (requires playwright)
 
@@ -42,23 +48,27 @@ async def capture_page_evidence(
         url: Web page URL to capture
         person_id: Optional Person UUID to attach evidence to
         run_id: Optional Run UUID for provenance
-        mode: "text", "screenshot", or "full"
+        mode: "text", "fit_markdown", "screenshot", or "full"
         captured_by_agent: Agent capturing the evidence
         selector: Optional CSS selector to extract only a portion
     """
-    if mode not in ("text", "screenshot", "full"):
-        return {"status": "error", "error": {"code": "invalid_mode", "message": f"Mode '{mode}' not supported. Use 'text', 'screenshot', or 'full'."}}
+    if mode not in ("text", "fit_markdown", "screenshot", "full"):
+        return {"status": "error", "error": {"code": "invalid_mode", "message": f"Mode '{mode}' not supported. Use 'text', 'fit_markdown', 'screenshot', or 'full'."}}
 
     evidence_id = uuid4()
     content: dict[str, Any] = {"url": url, "mode": mode, "captured_at": str(evidence_id)}
     title = f"Page capture: {url[:100]}"
 
     text_content: str | None = None
+    markdown_content: str | None = None
     screenshot_data: str | None = None  # base64
 
     try:
-        # Always capture text via httpx (lightweight, no deps)
-        text_content = await _capture_text(url, selector)
+        # Capture text content
+        if mode in ("text", "full"):
+            text_content = await _capture_text(url, selector)
+        elif mode == "fit_markdown":
+            markdown_content = await _capture_fit_markdown(url, selector)
 
         # Screenshot requires Playwright
         if mode in ("screenshot", "full"):
@@ -71,6 +81,10 @@ async def capture_page_evidence(
         if text_content:
             content["text"] = text_content[:50000]  # Truncate large pages
             content["text_length"] = len(text_content)
+        if markdown_content:
+            content["markdown"] = markdown_content[:50000]
+            content["markdown_length"] = len(markdown_content)
+            content["denoised"] = True
         if screenshot_data:
             content["screenshot_base64"] = screenshot_data[:500000]
             content["screenshot_format"] = "png"
@@ -92,8 +106,10 @@ async def capture_page_evidence(
             "url": url,
             "mode": mode,
             "has_text": text_content is not None,
+            "has_markdown": markdown_content is not None,
             "has_screenshot": screenshot_data is not None,
             "text_length": len(text_content) if text_content else 0,
+            "markdown_length": len(markdown_content) if markdown_content else 0,
             "title": title,
         }
 
@@ -127,6 +143,27 @@ async def _capture_text(url: str, selector: str | None = None) -> str:
     text = re.sub(r'\s+', ' ', text).strip()
 
     return text
+
+
+async def _capture_fit_markdown(url: str, selector: str | None = None) -> str:
+    """Fetch page and convert to denoised Markdown via fit_markdown extraction."""
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        }
+        resp = await client.get(url, headers=headers)
+        resp.raise_for_status()
+        html = resp.text
+
+    # If a CSS selector is provided, extract only that portion
+    if selector:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, "html.parser")
+        el = soup.select_one(selector)
+        if el:
+            html = str(el)
+
+    return html_to_fit_markdown(html, url=url, max_length=40000)
 
 
 async def _capture_screenshot(url: str, selector: str | None = None) -> str | None:

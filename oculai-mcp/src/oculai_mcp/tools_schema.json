@@ -1,0 +1,1230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Oculai Tool Schemas",
+  "description": "Single source of truth for all Oculai MCP tool parameter schemas. Used to generate server.py, tool_registry.py, and pi-session.ts representations.",
+  "tools": {
+    "oculai_create_run": {
+      "description": "Create a new talent sourcing run.",
+      "group": "Run Lifecycle",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "job_title": {
+            "type": "string",
+            "description": "The job title (e.g. \"Senior NLP Researcher\")"
+          },
+          "jd_text": {
+            "type": "string",
+            "description": "Full job description text"
+          },
+          "required_skills": {
+            "type": "string",
+            "description": "List of required skills extracted from JD",
+            "default": null
+          },
+          "target_domains": {
+            "type": "string",
+            "description": "Academic/tech domains (e.g. [\"cs.AI\", \"cs.CL\"])",
+            "default": null
+          },
+          "config": {
+            "type": "string",
+            "description": "Optional sourcing configuration (sources, concurrency, etc.)",
+            "default": null
+          }
+        },
+        "required": [
+          "job_title",
+          "jd_text"
+        ]
+      }
+    },
+    "oculai_get_run_state": {
+      "description": "Get the current state of a sourcing run.",
+      "group": "Run Lifecycle",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "The run UUID returned by oculai_create_run"
+          }
+        },
+        "required": [
+          "run_id"
+        ]
+      }
+    },
+    "oculai_checkpoint_plan": {
+      "description": "Write a Plan + Task DAG to the database.",
+      "group": "Run Lifecycle",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "The run UUID"
+          },
+          "plan_json": {
+            "type": "string",
+            "description": "Full plan with tasks and dependencies"
+          },
+          "strategy_summary": {
+            "type": "string",
+            "description": "Human-readable summary of the strategy",
+            "default": ""
+          }
+        },
+        "required": [
+          "run_id",
+          "plan_json"
+        ]
+      }
+    },
+    "oculai_claim_tasks": {
+      "description": "Claim pending tasks for a subagent to execute.",
+      "group": "Task Management",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "The run UUID"
+          },
+          "task_types": {
+            "type": "string",
+            "description": "Task types to claim (e.g. [\"search\", \"evaluate\"])"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Identifier for the claiming agent/subagent"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max number of tasks to claim",
+            "default": 5
+          }
+        },
+        "required": [
+          "run_id",
+          "task_types",
+          "agent_id"
+        ]
+      }
+    },
+    "oculai_complete_task": {
+      "description": "Mark a task as completed with output data.",
+      "group": "Task Management",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "The task UUID"
+          },
+          "output_data": {
+            "type": "string",
+            "description": "Task output (candidates, scores, etc.)"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Identifier for the completing agent"
+          }
+        },
+        "required": [
+          "task_id",
+          "output_data",
+          "agent_id"
+        ]
+      }
+    },
+    "oculai_fail_task": {
+      "description": "Mark a task as failed. Auto-retries if retry_count < max_retries.",
+      "group": "Task Management",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "The task UUID"
+          },
+          "error_message": {
+            "type": "string",
+            "description": "Description of the failure"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Identifier for the failing agent",
+            "default": "system"
+          }
+        },
+        "required": [
+          "task_id",
+          "error_message"
+        ]
+      }
+    },
+    "oculai_record_iteration": {
+      "description": "Persist one step of an agent's reasoning loop to the database.",
+      "group": "ReAct Audit & Cross-Agent",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "The Task UUID this iteration belongs to"
+          },
+          "iteration_number": {
+            "type": "integer",
+            "description": "Auto-incrementing step number within the task"
+          },
+          "iteration_type": {
+            "type": "string",
+            "description": "think | search | observe | classify | detail | adjust | stop | gather | assess | reprioritize | initialize"
+          },
+          "reasoning_text": {
+            "type": "string",
+            "description": "Pre-action reasoning (for THINK steps)",
+            "default": null
+          },
+          "action_taken": {
+            "type": "string",
+            "description": "Tool/action name (for SEARCH, DETAIL steps)",
+            "default": null
+          },
+          "action_params": {
+            "type": "string",
+            "description": "JSON parameters passed to the action",
+            "default": null
+          },
+          "observation_text": {
+            "type": "string",
+            "description": "Post-action analysis (for OBSERVE steps)",
+            "default": null
+          },
+          "observation_data": {
+            "type": "string",
+            "description": "Structured observation metadata",
+            "default": null
+          },
+          "decision": {
+            "type": "string",
+            "description": "High-level decision (NARROW, PIVOT, DEEPEN, STOP, etc.)",
+            "default": null
+          },
+          "decision_rationale": {
+            "type": "string",
+            "description": "Why this decision was made",
+            "default": null
+          }
+        },
+        "required": [
+          "task_id",
+          "iteration_number",
+          "iteration_type"
+        ]
+      }
+    },
+    "oculai_get_task_iterations": {
+      "description": "Get all recorded iterations for a task, ordered by step number.",
+      "group": "ReAct Audit & Cross-Agent",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "The task UUID"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      }
+    },
+    "oculai_broadcast_discovery": {
+      "description": "Broadcast a discovery to all parallel agents in this run.",
+      "group": "ReAct Audit & Cross-Agent",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "The SourcingRun UUID"
+          },
+          "discovery_type": {
+            "type": "string",
+            "description": "terminology | population_insight | source_quality"
+          },
+          "content": {
+            "type": "string",
+            "description": "The discovery text"
+          },
+          "discovered_by_agent": {
+            "type": "string",
+            "description": "Agent identifier (e.g., \"source-researcher-juejin\")"
+          }
+        },
+        "required": [
+          "run_id",
+          "discovery_type",
+          "content",
+          "discovered_by_agent"
+        ]
+      }
+    },
+    "oculai_get_broadcasts": {
+      "description": "Get all unconsumed broadcasts from other agents in this run.",
+      "group": "ReAct Audit & Cross-Agent",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "The SourcingRun UUID"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "The requesting agent's identifier"
+          }
+        },
+        "required": [
+          "run_id",
+          "agent_id"
+        ]
+      }
+    },
+    "oculai_list_source_capabilities": {
+      "description": "List all registered data sources and their capabilities.",
+      "group": "Source Tools",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    "oculai_search_source": {
+      "description": "Search a specific data source and return structured candidates.",
+      "group": "Source Tools",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "description": "Source identifier (e.g. \"arxiv\", \"semantic_scholar\")"
+          },
+          "keywords": {
+            "type": "string",
+            "description": "Search keyword list"
+          },
+          "run_id": {
+            "type": "string",
+            "description": "Optional run UUID for provenance tracking",
+            "default": null
+          },
+          "source_specific_query": {
+            "type": "string",
+            "description": "Advanced query string (source-specific syntax)",
+            "default": null
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max results (default 20)",
+            "default": 20
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Pagination offset",
+            "default": 0
+          }
+        },
+        "required": [
+          "source_name",
+          "keywords"
+        ]
+      }
+    },
+    "oculai_deep_search": {
+      "description": "Execute deep iterative search across hypotheses and sources.",
+      "group": "Source Tools",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "The run UUID"
+          },
+          "hypotheses": {
+            "type": "string",
+            "description": "Search hypotheses from Search Strategist"
+          },
+          "config": {
+            "type": "string",
+            "description": "Optional overrides for depth limits, budgets, thresholds",
+            "default": null
+          }
+        },
+        "required": [
+          "run_id",
+          "hypotheses"
+        ]
+      }
+    },
+    "oculai_get_search_progress": {
+      "description": "Get current deep search progress for a run.",
+      "group": "Source Tools",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "The run UUID"
+          }
+        },
+        "required": [
+          "run_id"
+        ]
+      }
+    },
+    "oculai_crawl_site": {
+      "description": "Crawl a website starting from a URL to discover deep candidate evidence.",
+      "group": "Source Tools",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "start_url": {
+            "type": "string",
+            "description": "Starting URL for the crawl (e.g., candidate's homepage)"
+          },
+          "max_pages": {
+            "type": "integer",
+            "description": "Maximum pages to fetch (default 20)",
+            "default": 20
+          },
+          "max_depth": {
+            "type": "integer",
+            "description": "Maximum link depth from start URL (default 2)",
+            "default": 2
+          },
+          "same_domain_only": {
+            "type": "boolean",
+            "description": "Only follow links within the same domain (default True)",
+            "default": true
+          },
+          "run_id": {
+            "type": "string",
+            "description": "Optional run UUID for provenance tracking",
+            "default": null
+          }
+        },
+        "required": [
+          "start_url"
+        ]
+      }
+    },
+    "oculai_fetch_source_detail": {
+      "description": "Fetch detailed information for a single candidate from a source.",
+      "group": "Source Tools",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "description": "Source identifier (e.g. \"semantic_scholar\", \"dblp\")"
+          },
+          "external_id": {
+            "type": "string",
+            "description": "External identifier (author ID, ORCID, etc.)"
+          }
+        },
+        "required": [
+          "source_name",
+          "external_id"
+        ]
+      }
+    },
+    "oculai_upsert_candidate": {
+      "description": "Idempotent candidate upsert with identity resolution.",
+      "group": "Candidate Tools",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "The run UUID"
+          },
+          "person_data": {
+            "type": "string",
+            "description": "Dict with name, institution, h_index, paper_count, citation_count, orcid, google_scholar_id, github_id, linkedin_url, dblp_key, research_areas"
+          },
+          "source_name": {
+            "type": "string",
+            "description": "Which source this candidate came from",
+            "default": "unknown"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Identifier for the agent doing the upsert",
+            "default": "system"
+          }
+        },
+        "required": [
+          "run_id",
+          "person_data"
+        ]
+      }
+    },
+    "oculai_upsert_candidates_batch": {
+      "description": "Batch upsert multiple candidates in a single DB transaction.",
+      "group": "Candidate Tools",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "The run UUID"
+          },
+          "candidates_list": {
+            "type": "string",
+            "description": "List of person_data dicts (same shape as oculai_upsert_candidate)"
+          },
+          "source_name": {
+            "type": "string",
+            "description": "Which source these candidates came from",
+            "default": "unknown"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Identifier for the agent doing the upsert",
+            "default": "system"
+          }
+        },
+        "required": [
+          "run_id",
+          "candidates_list"
+        ]
+      }
+    },
+    "oculai_link_identity": {
+      "description": "Link an external identity (ORCID, Google Scholar, etc.) to a Person.",
+      "group": "Candidate Tools",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "person_id": {
+            "type": "string",
+            "description": "Internal Person UUID"
+          },
+          "source_type": {
+            "type": "string",
+            "description": "Identity source type (orcid, google_scholar, github, linkedin, dblp)"
+          },
+          "external_id": {
+            "type": "string",
+            "description": "The external identifier string"
+          },
+          "external_url": {
+            "type": "string",
+            "description": "Optional profile URL",
+            "default": null
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Match confidence (0.0-1.0)",
+            "default": 1
+          },
+          "verified_by_agent": {
+            "type": "string",
+            "description": "Agent that verified this link",
+            "default": "system"
+          }
+        },
+        "required": [
+          "person_id",
+          "source_type",
+          "external_id"
+        ]
+      }
+    },
+    "oculai_list_candidates": {
+      "description": "List candidates in a sourcing run with basic person info.",
+      "group": "Candidate Tools",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "The run UUID"
+          },
+          "status": {
+            "type": "string",
+            "description": "Filter by candidate status (new, shortlisted, rejected, contacted, etc.)",
+            "default": null
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max results (default 100)",
+            "default": 100
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Pagination offset",
+            "default": 0
+          }
+        },
+        "required": [
+          "run_id"
+        ]
+      }
+    },
+    "oculai_get_candidate": {
+      "description": "Get full candidate profile: person, identities, publications, career, evidence, assessments.",
+      "group": "Candidate Tools",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "person_id": {
+            "type": "string",
+            "description": "Internal Person UUID"
+          }
+        },
+        "required": [
+          "person_id"
+        ]
+      }
+    },
+    "oculai_attach_evidence": {
+      "description": "Attach a piece of evidence to a candidate.",
+      "group": "Evidence Tools",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "person_id": {
+            "type": "string",
+            "description": "Internal Person UUID"
+          },
+          "evidence_type": {
+            "type": "string",
+            "description": "Type (publication, code_repo, patent, award, career_history, etc.)"
+          },
+          "title": {
+            "type": "string",
+            "description": "Human-readable evidence title"
+          },
+          "source_name": {
+            "type": "string",
+            "description": "Where the evidence came from"
+          },
+          "source_url": {
+            "type": "string",
+            "description": "Source URL for traceability",
+            "default": null
+          },
+          "description": {
+            "type": "string",
+            "description": "Short description",
+            "default": null
+          },
+          "content": {
+            "type": "string",
+            "description": "Structured content (paper abstract, repo stats, etc.)",
+            "default": null
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Evidence confidence (0.0-1.0)",
+            "default": 1
+          },
+          "run_id": {
+            "type": "string",
+            "description": "Optional run UUID for scoping",
+            "default": null
+          },
+          "captured_by_agent": {
+            "type": "string",
+            "description": "Which agent captured this evidence",
+            "default": "system"
+          },
+          "metadata": {
+            "type": "string",
+            "description": "Arbitrary metadata",
+            "default": null
+          }
+        },
+        "required": [
+          "person_id",
+          "evidence_type",
+          "title",
+          "source_name"
+        ]
+      }
+    },
+    "oculai_get_evidence": {
+      "description": "Get all evidence for a candidate, optionally filtered by type.",
+      "group": "Evidence Tools",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "person_id": {
+            "type": "string",
+            "description": "Internal Person UUID"
+          },
+          "evidence_type": {
+            "type": "string",
+            "description": "Optional filter (publication, code_repo, award, etc.)",
+            "default": null
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max results (default 100)",
+            "default": 100
+          },
+          "min_tier": {
+            "type": "integer",
+            "description": "Minimum evidence tier to include (1-4, optional)",
+            "default": null
+          }
+        },
+        "required": [
+          "person_id"
+        ]
+      }
+    },
+    "oculai_score_candidate": {
+      "description": "Score a candidate across multiple dimensions simultaneously.",
+      "group": "Assessment Tools",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "The run UUID"
+          },
+          "person_id": {
+            "type": "string",
+            "description": "Internal Person UUID"
+          },
+          "dimensions": {
+            "type": "string",
+            "description": "Dict of dimension_name to score (0.0-10.0)"
+          },
+          "assessor_agent": {
+            "type": "string",
+            "description": "Which agent performed the assessment"
+          },
+          "evidence_ids": {
+            "type": "string",
+            "description": "UUIDs of evidence records supporting the scores",
+            "default": null
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Overall assessment confidence (0.0-1.0)",
+            "default": 1
+          },
+          "rationale": {
+            "type": "string",
+            "description": "Free-text rationale",
+            "default": ""
+          },
+          "role_type": {
+            "type": "string",
+            "description": "Role type for weight calibration (research_scientist, engineer, tech_lead, ml_engineer, product_manager, data_scientist, default)",
+            "default": "default"
+          }
+        },
+        "required": [
+          "run_id",
+          "person_id",
+          "dimensions",
+          "assessor_agent"
+        ]
+      }
+    },
+    "oculai_record_assessment": {
+      "description": "Record a single dimension assessment for a candidate.",
+      "group": "Assessment Tools",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "The run UUID"
+          },
+          "person_id": {
+            "type": "string",
+            "description": "Internal Person UUID"
+          },
+          "assessor_agent": {
+            "type": "string",
+            "description": "Which agent performed the assessment"
+          },
+          "dimension": {
+            "type": "string",
+            "description": "Dimension name (skill_match, research_output, industry_impact, etc.)"
+          },
+          "score": {
+            "type": "number",
+            "description": "Score 0.0-10.0"
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Assessment confidence (0.0-1.0)",
+            "default": 1
+          },
+          "rationale": {
+            "type": "string",
+            "description": "Free-text rationale",
+            "default": ""
+          },
+          "evidence_ids": {
+            "type": "string",
+            "description": "UUIDs of evidence records supporting this score",
+            "default": null
+          },
+          "role_type": {
+            "type": "string",
+            "description": "Role type for weight calibration",
+            "default": "default"
+          }
+        },
+        "required": [
+          "run_id",
+          "person_id",
+          "assessor_agent",
+          "dimension",
+          "score"
+        ]
+      }
+    },
+    "oculai_get_shortlist": {
+      "description": "Get shortlisted candidates ranked by overall quality score.",
+      "group": "Assessment Tools",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "The run UUID"
+          },
+          "min_score": {
+            "type": "number",
+            "description": "Minimum quality score threshold (default 0 = all)",
+            "default": 0
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max candidates to return",
+            "default": 20
+          }
+        },
+        "required": [
+          "run_id"
+        ]
+      }
+    },
+    "oculai_get_score_history": {
+      "description": "Get score change history for auditing.",
+      "group": "Assessment Tools",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "The run UUID"
+          },
+          "person_id": {
+            "type": "string",
+            "description": "Optional person UUID to filter by",
+            "default": null
+          },
+          "dimension": {
+            "type": "string",
+            "description": "Optional dimension name to filter by",
+            "default": null
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max history entries to return",
+            "default": 100
+          }
+        },
+        "required": [
+          "run_id"
+        ]
+      }
+    },
+    "oculai_get_evidence_by_tier": {
+      "description": "Get evidence up to a given quality tier.",
+      "group": "Assessment Tools",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "The run UUID"
+          },
+          "person_id": {
+            "type": "string",
+            "description": "Internal Person UUID"
+          },
+          "max_tier": {
+            "type": "integer",
+            "description": "Maximum tier to include (default 2 = primary + secondary)",
+            "default": 2
+          }
+        },
+        "required": [
+          "run_id",
+          "person_id"
+        ]
+      }
+    },
+    "oculai_create_review_session": {
+      "description": "Create a multi-pass review session for a run's candidate pool.",
+      "group": "Review Orchestrator",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "The run UUID"
+          },
+          "role_type": {
+            "type": "string",
+            "description": "Role type for weight calibration (research_scientist, engineer, tech_lead, ml_engineer, product_manager, data_scientist, default)",
+            "default": "default"
+          },
+          "candidate_ids": {
+            "type": "string",
+            "description": "Optional list of person UUIDs to review. If None, all candidates in the run are included.",
+            "default": null
+          }
+        },
+        "required": [
+          "run_id"
+        ]
+      }
+    },
+    "oculai_execute_review_pass": {
+      "description": "Advance a review session to the next pass.",
+      "group": "Review Orchestrator",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "Review session UUID"
+          },
+          "pass_type": {
+            "type": "string",
+            "description": "Current pass (enrichment, initial_scoring, audit, adjustment, complete)"
+          },
+          "completed_candidate_ids": {
+            "type": "string",
+            "description": "Candidates that finished this pass",
+            "default": null
+          }
+        },
+        "required": [
+          "session_id",
+          "pass_type"
+        ]
+      }
+    },
+    "oculai_get_review_progress": {
+      "description": "Get current review session progress.",
+      "group": "Review Orchestrator",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "Review session UUID"
+          }
+        },
+        "required": [
+          "session_id"
+        ]
+      }
+    },
+    "oculai_apply_audit_adjustments": {
+      "description": "Apply auditor-recommended score adjustments with history tracking.",
+      "group": "Review Orchestrator",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "Review session UUID"
+          },
+          "adjustments": {
+            "type": "string",
+            "description": "List of adjustment dicts, each containing: person_id, dimension, new_score, reason, assessor_agent, optional confidence, optional evidence_ids"
+          }
+        },
+        "required": [
+          "session_id",
+          "adjustments"
+        ]
+      }
+    },
+    "oculai_finalize_review_session": {
+      "description": "Mark a review session as complete and compute final rankings.",
+      "group": "Review Orchestrator",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "Review session UUID"
+          }
+        },
+        "required": [
+          "session_id"
+        ]
+      }
+    },
+    "oculai_export_report": {
+      "description": "Export a sourcing run report in HTML (default) or Markdown format.",
+      "group": "Review Orchestrator",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "The run UUID"
+          },
+          "format": {
+            "type": "string",
+            "description": "\"html\" (default) or \"markdown\"",
+            "default": "html"
+          }
+        },
+        "required": [
+          "run_id"
+        ]
+      }
+    },
+    "oculai_search_web": {
+      "description": "Search the web for candidate-related content via Exa or Tavily.",
+      "group": "Web Search, Outreach & Browser",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "keywords": {
+            "type": "string",
+            "description": "Search keyword list"
+          },
+          "provider": {
+            "type": "string",
+            "description": "\"tavily\" (default) or \"exa\"",
+            "default": "tavily"
+          },
+          "run_id": {
+            "type": "string",
+            "description": "Optional run UUID for provenance tracking",
+            "default": null
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max results (default 20)",
+            "default": 20
+          },
+          "include_domains": {
+            "type": "string",
+            "description": "Optional domain whitelist (e.g. [\"linkedin.com\"])",
+            "default": null
+          },
+          "exclude_domains": {
+            "type": "string",
+            "description": "Optional domain blacklist",
+            "default": null
+          }
+        },
+        "required": [
+          "keywords"
+        ]
+      }
+    },
+    "oculai_create_outreach_draft": {
+      "description": "Create an outreach draft for a candidate. DOES NOT SEND.",
+      "group": "Web Search, Outreach & Browser",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "The run UUID"
+          },
+          "person_id": {
+            "type": "string",
+            "description": "Target candidate Person UUID"
+          },
+          "strategy": {
+            "type": "string",
+            "description": "Outreach strategy (warm_intro, cold_email, linkedin_inmail, etc.)"
+          },
+          "template": {
+            "type": "string",
+            "description": "Template name to base the draft on",
+            "default": "standard"
+          },
+          "channel": {
+            "type": "string",
+            "description": "Contact channel (email, linkedin, wechat)",
+            "default": "email"
+          },
+          "draft_content": {
+            "type": "string",
+            "description": "The draft message body",
+            "default": ""
+          },
+          "subject": {
+            "type": "string",
+            "description": "Email subject line",
+            "default": ""
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Agent creating the draft",
+            "default": "system"
+          }
+        },
+        "required": [
+          "run_id",
+          "person_id",
+          "strategy"
+        ]
+      }
+    },
+    "oculai_request_human_approval": {
+      "description": "Request human approval for an action with external side effects.",
+      "group": "Web Search, Outreach & Browser",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "The run UUID"
+          },
+          "action_type": {
+            "type": "string",
+            "description": "Type (send_email, send_linkedin_message, etc.)"
+          },
+          "action_context": {
+            "type": "string",
+            "description": "Full context dict describing what, who, and why"
+          },
+          "draft_content": {
+            "type": "string",
+            "description": "The draft content to be approved",
+            "default": ""
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Agent requesting approval",
+            "default": "system"
+          }
+        },
+        "required": [
+          "run_id",
+          "action_type",
+          "action_context"
+        ]
+      }
+    },
+    "oculai_check_approval_status": {
+      "description": "Check the status of a human approval request.",
+      "group": "Web Search, Outreach & Browser",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "approval_id": {
+            "type": "string",
+            "description": "The approval UUID"
+          }
+        },
+        "required": [
+          "approval_id"
+        ]
+      }
+    },
+    "oculai_list_pending_approvals": {
+      "description": "List all pending human approval requests.",
+      "group": "Web Search, Outreach & Browser",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "Optional run UUID to filter by",
+            "default": null
+          }
+        },
+        "required": []
+      }
+    },
+    "oculai_get_outreach_history": {
+      "description": "Get outreach history for a candidate.",
+      "group": "Web Search, Outreach & Browser",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "person_id": {
+            "type": "string",
+            "description": "Internal Person UUID"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max records to return",
+            "default": 50
+          }
+        },
+        "required": [
+          "person_id"
+        ]
+      }
+    },
+    "oculai_capture_page_evidence": {
+      "description": "Capture evidence from a web page (text content and/or screenshot).",
+      "group": "Web Search, Outreach & Browser",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Web page URL to capture"
+          },
+          "person_id": {
+            "type": "string",
+            "description": "Optional Person UUID to attach evidence to",
+            "default": null
+          },
+          "run_id": {
+            "type": "string",
+            "description": "Optional Run UUID for provenance",
+            "default": null
+          },
+          "mode": {
+            "type": "string",
+            "description": "\"text\" (lightweight, default), \"screenshot\" (needs Playwright), or \"full\"",
+            "default": "text"
+          },
+          "captured_by_agent": {
+            "type": "string",
+            "description": "Agent capturing the evidence",
+            "default": "system"
+          },
+          "selector": {
+            "type": "string",
+            "description": "Optional CSS selector to extract only part of the page",
+            "default": null
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    }
+  }
+}

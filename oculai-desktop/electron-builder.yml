@@ -1,0 +1,60 @@
+appId: com.oculai.desktop
+productName: Oculai
+copyright: "Copyright © 2026 Oculai"
+artifactName: "${productName}-${version}-${platform}-${arch}.${ext}"
+
+directories:
+  output: dist-electron
+  buildResources: resources
+
+files:
+  - dist/**/*
+  - resources/**/*
+  - package.json
+
+extraResources:
+  - from: resources/
+    to: resources/
+    filter:
+      - "**/*"
+
+asar: true
+compression: maximum
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: "${productName}-Setup-${version}.${ext}"
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Oculai
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  category: public.app-category.business
+  hardenedRuntime: true
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  category: Office
+  synopsis: AI-Powered Talent Sourcing
+
+publish:
+  - provider: github
+    owner: oculai
+    repo: Oculai-Pi
+    releaseType: draft

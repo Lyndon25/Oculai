@@ -13,7 +13,7 @@ from oculai_mcp.db import runs, tasks
 from oculai_mcp.db import iterations as iteration_db
 from oculai_mcp.db import broadcasts as broadcast_db
 from oculai_mcp.tools import candidates, evidence, assessment, sources, report
-from oculai_mcp.tools import web_search, outreach, browser, deep_search as deep_search_tool
+from oculai_mcp.tools import web_search, outreach, browser, deep_search as deep_search_tool, site_crawler
 from oculai_mcp.tools import review_orchestrator as review
 
 mcp = FastMCP(
@@ -472,6 +472,42 @@ async def oculai_get_search_progress(run_id: str) -> dict[str, Any]:
     """
     from uuid import UUID
     return await deep_search_tool.get_search_progress(UUID(run_id))
+
+
+@mcp.tool
+async def oculai_crawl_site(
+    start_url: str,
+    max_pages: int = 20,
+    max_depth: int = 2,
+    same_domain_only: bool = True,
+    run_id: str | None = None,
+) -> dict[str, Any]:
+    """Crawl a website starting from a URL to discover deep candidate evidence.
+
+    Uses BFS to explore linked pages within the same domain, extracting
+    clean denoised Markdown from each page. Useful for deep exploration
+    of a candidate's personal website, lab page, or portfolio beyond
+    what a single-page scrape can capture.
+
+    All pages are denoised via fit_markdown extraction (removes navigation,
+    ads, sidebars) for LLM-optimized output. JavaScript-heavy pages are
+    automatically rendered via Playwright when available.
+
+    Args:
+        start_url: Starting URL for the crawl (e.g., candidate's homepage)
+        max_pages: Maximum pages to fetch (default 20)
+        max_depth: Maximum link depth from start URL (default 2)
+        same_domain_only: Only follow links within the same domain (default True)
+        run_id: Optional run UUID for provenance tracking
+    """
+    from uuid import UUID
+    return await site_crawler.crawl_site(
+        start_url=start_url,
+        max_pages=max_pages,
+        max_depth=max_depth,
+        same_domain_only=same_domain_only,
+        run_id=UUID(run_id) if run_id else None,
+    )
 
 
 @mcp.tool

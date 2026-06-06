@@ -17,6 +17,7 @@ dependencies = [
 # Source connectors (install as needed)
 playwright = ["playwright>=1.40"]
 baidu = ["baidu-search", "baidu-scholar-search"]
+duckduckgo = ["duckduckgo-search>=7.0"]
 
 # Development
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24"]
@@ -27,3 +28,13 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/oculai_mcp"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "e2e: End-to-end tests requiring a running PostgreSQL instance",
+    "unit: Unit tests that can run without external dependencies",
+    "slow: Tests that take more than 5 seconds",
+]
