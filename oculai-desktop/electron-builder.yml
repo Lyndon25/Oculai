@@ -8,18 +8,19 @@ directories:
   buildResources: resources
 
 files:
-  - dist/**/*
-  - resources/**/*
+  - dist/main/**/*
+  - dist/renderer/**/*
+  - dist/resources/**/*
   - package.json
 
 extraResources:
-  - from: resources/
-    to: resources/
+  - from: ../pi-windows-x64/
+    to: pi-windows-x64/
     filter:
       - "**/*"
 
 asar: true
-compression: maximum
+compression: normal
 
 win:
   target:
@@ -36,25 +37,8 @@ nsis:
   createStartMenuShortcut: true
   shortcutName: Oculai
 
-mac:
-  target:
-    - target: dmg
-      arch:
-        - x64
-        - arm64
-  category: public.app-category.business
-  hardenedRuntime: true
-
-linux:
-  target:
-    - target: AppImage
-      arch:
-        - x64
-  category: Office
-  synopsis: AI-Powered Talent Sourcing
-
 publish:
   - provider: github
-    owner: oculai
-    repo: Oculai-Pi
+    owner: Lyndon25
+    repo: Oculai
     releaseType: draft

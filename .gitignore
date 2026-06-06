@@ -59,4 +59,10 @@ oculai-mcp/run_test_*.py
 oculai-mcp/run_pipeline.py
 oculai-mcp/mcp_call.py
 oculai-mcp/generate_report_*.py
+
+# Pi runtime binary (121MB+), tracked via LFS if needed
 pi-windows-x64/
+
+# Desktop app — dependencies and build artifacts (not committed)
+oculai-desktop/node_modules/
+oculai-desktop/dist-electron/

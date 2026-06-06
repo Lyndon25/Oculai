@@ -1,0 +1,29 @@
+#!/bin/sh
+# Pre-merge-commit hook: prevent merging between Oculai-Pi and master.
+# These branches should remain divergent — Oculai-Pi is the development branch,
+# master is the stable release branch.
+
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+MERGE_SOURCE=$(git rev-parse --abbrev-ref MERGE_HEAD 2>/dev/null)
+
+FORBIDDEN_PAIRS="Oculai-Pi master"
+
+if [ -n "$MERGE_SOURCE" ] && [ -n "$CURRENT_BRANCH" ]; then
+    case "$FORBIDDEN_PAIRS" in
+        *"$CURRENT_BRANCH $MERGE_SOURCE"*|*"$MERGE_SOURCE $CURRENT_BRANCH"*)
+            echo ""
+            echo "ERROR: Merging between 'Oculai-Pi' and 'master' is prohibited."
+            echo "  Current branch: $CURRENT_BRANCH"
+            echo "  Source branch:  $MERGE_SOURCE"
+            echo ""
+            echo "These branches are intentionally kept separate:"
+            echo "  - master   = stable release line"
+            echo "  - Oculai-Pi = development branch"
+            echo ""
+            echo "If you need changes from the other branch, cherry-pick specific commits."
+            exit 1
+            ;;
+    esac
+fi
+
+exit 0

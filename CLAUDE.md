@@ -348,7 +348,28 @@ Typed IPC channels in `src/shared/ipc-channels.ts` split into:
 - Schema SQL, agent prompts, skill definition, and slash commands are bundled as `extraResources`
 
 ### Pi Runtime
-`pi-windows-x64/` contains the Pi CLI runtime binary (`pi.exe`) and SDK examples. The Electron app's `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` npm packages wrap this runtime. The runtime handles LLM communication, context management, tool execution, and session persistence — Oculai provides the tools and system prompt on top.
+`pi-windows-x64/` contains the Pi CLI runtime binary (`pi.exe`, ~121MB) and SDK examples. The Electron app's `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` npm packages wrap this runtime. The runtime handles LLM communication, context management, tool execution, and session persistence — Oculai provides the tools and system prompt on top.
+
+> **Note:** `pi.exe` is currently gitignored (not tracked in version control). The npm dependency should download the appropriate runtime automatically. If you need to version the binary in the repo, switch to Git LFS: `git lfs track "pi-windows-x64/pi.exe"` and remove the `pi-windows-x64/` line from `.gitignore`.
+
+## Git LFS & Large File Management
+
+The following large artifacts exist in the repo tree — all are gitignored to prevent accidental commits:
+
+| Artifact | Size | Git Status |
+|---|---|---|
+| `pi-windows-x64/pi.exe` | ~121 MB | Gitignored (`.gitignore`) |
+| `oculai-desktop/dist-electron/` | ~721 MB | Gitignored (`.gitignore`) |
+| `oculai-desktop/node_modules/` | ~834 MB | Gitignored (`.gitignore`) |
+
+**Rules:**
+- **Never** `git add` these directories — they contain build artifacts, dependencies, and large binaries
+- `oculai-desktop/package-lock.json` **is** committed (it pins dependency versions for reproducible builds)
+- `dist-electron/` is output from `electron-builder`; it's regenerated on every build, not committed
+- If a large file (>100MB) needs to be tracked, use `git lfs track "<pattern>"` before adding it
+- To check current LFS tracking: `git lfs track`
+
+**Branch protection:** Merges between `Oculai-Pi` and `master` are prevented via a shared git hook (see `.githooks/pre-merge-commit`).
 
 ## Directory Map
 

@@ -109,7 +109,7 @@ export class SettingsStore {
   }
 
   set<K extends keyof AppSettings>(key: K, value: AppSettings[K]): void {
-    (this.settings as Record<string, unknown>)[key] = value;
+    (this.settings as unknown as Record<string, unknown>)[key] = value;
     this.save();
   }
 
