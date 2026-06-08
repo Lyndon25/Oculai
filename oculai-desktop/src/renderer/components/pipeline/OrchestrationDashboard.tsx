@@ -1,5 +1,5 @@
 import { useStore } from "../../store/index.js";
-import { useState } from "react";
+import { useMemo } from "react";
 import {
   Brain,
   Search,
@@ -10,23 +10,31 @@ import {
   Send,
   Wand2,
   Activity,
-  ChevronDown,
-  ChevronUp,
   Clock,
+  AlertTriangle,
+  Radio,
+  Tags,
+  UserPlus,
+  BarChart3,
+  Microscope,
+  FileOutput,
+  Zap,
 } from "lucide-react";
+import type React from "react";
 import type { PipelinePhase, SubagentState } from "../../../shared/types.js";
+import { EmptyState, cx } from "../ui/primitives.js";
 
 const PHASE_LABELS: Record<PipelinePhase, string> = {
-  init: "Initializing",
-  strategy: "Strategy",
-  searching: "Searching",
-  identity_resolution: "Identity Resolution",
-  enrichment: "Enrichment",
-  evaluation: "Evaluation",
-  audit: "Audit",
-  shortlist: "Shortlist",
-  outreach: "Outreach",
-  complete: "Complete",
+  init: "初始化",
+  strategy: "策略",
+  searching: "搜索",
+  identity_resolution: "身份合并",
+  enrichment: "证据补全",
+  evaluation: "评估",
+  audit: "审计",
+  shortlist: "短名单",
+  outreach: "触达",
+  complete: "完成",
 };
 
 const PHASE_ORDER: PipelinePhase[] = [
@@ -45,18 +53,18 @@ const AGENT_ICONS: Record<string, React.ComponentType<{ className?: string }>> =
   "Outreach Strategist": Send,
 };
 
-const STATUS_COLORS: Record<SubagentState["status"], string> = {
-  idle: "border-gray-700 bg-gray-900/50",
-  active: "border-blue-500/50 bg-blue-900/20 animate-pulse",
-  done: "border-green-500/30 bg-green-900/20",
-  error: "border-red-500/30 bg-red-900/20",
+const STATUS_STYLE: Record<SubagentState["status"], string> = {
+  idle: "border-rule bg-surface",
+  active: "border-accent/30 bg-accent-soft",
+  done: "border-emerald-200 bg-emerald-50/60",
+  error: "border-red-200 bg-red-50/60",
 };
 
-const STATUS_DOTS: Record<SubagentState["status"], string> = {
-  idle: "bg-gray-600",
-  active: "bg-blue-400 animate-pulse",
-  done: "bg-green-400",
-  error: "bg-red-400",
+const STATUS_DOT: Record<SubagentState["status"], string> = {
+  idle: "bg-rule-strong",
+  active: "bg-accent animate-pulse",
+  done: "bg-emerald-500",
+  error: "bg-red-500",
 };
 
 export function OrchestrationDashboard() {
@@ -65,201 +73,226 @@ export function OrchestrationDashboard() {
   const activityFeed = useStore((s) => s.activityFeed);
   const candidates = useStore((s) => s.candidates);
 
-  const currentPhaseIdx = PHASE_ORDER.indexOf(orchestratorPhase);
-
+  const currentPhaseIdx = Math.max(0, PHASE_ORDER.indexOf(orchestratorPhase));
   const activeCount = subagents.filter((a) => a.status === "active").length;
   const doneCount = subagents.filter((a) => a.status === "done").length;
   const errorCount = subagents.filter((a) => a.status === "error").length;
+  const toolEvents = activityFeed.filter((entry) => entry.agentType === "Oculai Tool").length;
+  const reversedActivity = useMemo(() => [...activityFeed].reverse(), [activityFeed]);
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-6">
-      {/* Phase Indicator */}
-      <div className="panel p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <Activity className="w-4 h-4 text-blue-400" />
-          <span className="text-sm font-semibold text-gray-300">
-            {PHASE_LABELS[orchestratorPhase]}
-          </span>
-          <span className="text-xs text-gray-600 ml-auto">
-            {activeCount} active · {doneCount} done · {candidates.length} candidates
-          </span>
+    <div className="h-full overflow-y-auto p-5">
+      <div className="mx-auto max-w-7xl space-y-5">
+        {/* KPI Row */}
+        <div className="grid gap-3 md:grid-cols-4">
+          <KpiCard icon={Activity} label="当前阶段" value={PHASE_LABELS[orchestratorPhase]} />
+          <KpiCard icon={Zap} label="运行中 Agent" value={String(activeCount)} />
+          <KpiCard icon={Users} label="候选人" value={String(candidates.length)} />
+          <KpiCard icon={Radio} label="工具事件" value={String(toolEvents)} />
         </div>
-        <div className="flex items-center gap-1">
-          {PHASE_ORDER.map((phase, idx) => {
-            const isCurrent = idx === currentPhaseIdx;
-            const isDone = idx < currentPhaseIdx;
-            const isPending = idx > currentPhaseIdx;
 
-            return (
-              <div key={phase} className="flex items-center gap-1 flex-1">
-                <div
-                  className={`flex-1 h-1.5 rounded-full transition-all ${
-                    isCurrent
-                      ? "bg-blue-500"
-                      : isDone
-                        ? "bg-green-500/50"
-                        : "bg-gray-800"
-                  }`}
-                />
-                {idx < PHASE_ORDER.length - 1 && (
-                  <div className={`w-1 h-1 rounded-full ${isDone ? "bg-green-500/50" : "bg-gray-800"}`} />
-                )}
-              </div>
-            );
-          })}
-        </div>
-        <div className="flex items-center justify-between mt-2">
-          {PHASE_ORDER.map((phase, idx) => (
-            <span
-              key={phase}
-              className={`text-[10px] transition-colors ${
-                idx === currentPhaseIdx
-                  ? "text-blue-400 font-medium"
-                  : idx < currentPhaseIdx
-                    ? "text-green-500"
-                    : "text-gray-700"
-              }`}
-            >
-              {PHASE_LABELS[phase]}
+        {/* Phase Indicator */}
+        <div className="panel p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Activity className="h-4 w-4 text-accent" aria-hidden="true" />
+            <span className="text-sm font-semibold text-ink">
+              {PHASE_LABELS[orchestratorPhase]}
             </span>
-          ))}
-        </div>
-      </div>
-
-      {/* Agent Grid */}
-      <div className="panel p-4">
-        <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-          <Brain className="w-4 h-4 text-purple-400" />
-          Agents
-          <span className="text-xs text-gray-600 ml-auto">
-            {subagents.length} total · {activeCount} running · {doneCount} completed{errorCount > 0 ? ` · ${errorCount} failed` : ""}
-          </span>
-        </h3>
-
-        {subagents.length === 0 ? (
-          <div className="text-center py-8">
-            <div className="w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center mx-auto mb-2">
-              <Brain className="w-5 h-5 text-gray-600" />
-            </div>
-            <p className="text-sm text-gray-600">Waiting for agents to spawn...</p>
-            <p className="text-xs text-gray-700 mt-1">
-              The orchestrator will deploy specialized subagents as the pipeline progresses.
-            </p>
+            <span className="ml-auto text-xs text-ink-muted">
+              {activeCount} active · {doneCount} done · {candidates.length} candidates
+            </span>
           </div>
-        ) : (
-          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {subagents.map((agent) => {
-              const Icon = AGENT_ICONS[agent.agentType] || Brain;
+          <div className="grid grid-cols-5 gap-2 lg:grid-cols-10">
+            {PHASE_ORDER.map((phase, idx) => {
+              const isCurrent = idx === currentPhaseIdx;
+              const isDone = idx < currentPhaseIdx;
               return (
-                <div
-                  key={agent.agentId}
-                  className={`p-3 rounded-lg border transition-all ${STATUS_COLORS[agent.status]}`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <Icon className={`w-4 h-4 ${
-                      agent.status === "active" ? "text-blue-400" :
-                      agent.status === "done" ? "text-green-400" :
-                      agent.status === "error" ? "text-red-400" : "text-gray-600"
-                    }`} />
-                    <span className={`inline-block w-2 h-2 rounded-full ${STATUS_DOTS[agent.status]}`} />
+                <div key={phase} className="min-w-0">
+                  <div
+                    className={cx(
+                      "h-1.5 rounded-full transition-all duration-300",
+                      isCurrent
+                        ? "bg-accent"
+                        : isDone
+                          ? "bg-emerald-400"
+                          : "bg-rule",
+                    )}
+                  />
+                  <div
+                    className={cx(
+                      "mt-1 truncate text-[10px] font-medium transition-colors",
+                      isCurrent
+                        ? "text-accent"
+                        : isDone
+                          ? "text-emerald-600"
+                          : "text-ink-muted",
+                    )}
+                    title={PHASE_LABELS[phase]}
+                  >
+                    {PHASE_LABELS[phase]}
                   </div>
-                  <div className="text-xs font-medium text-gray-300 truncate">
-                    {agent.agentType}
-                  </div>
-                  <div className="text-[10px] text-gray-500 truncate mt-0.5">
-                    {agent.target}
-                  </div>
-                  {(agent.resultCount !== undefined && agent.status === "done") && (
-                    <div className="text-[10px] text-green-400 mt-1">
-                      {agent.resultCount} results
-                    </div>
-                  )}
-                  {agent.status === "error" && agent.error && (
-                    <div className="text-[10px] text-red-400 mt-1 truncate">
-                      {agent.error}
-                    </div>
-                  )}
-                  {agent.spawnedAt && (
-                    <div className="text-[9px] text-gray-700 mt-1 flex items-center gap-1">
-                      <Clock className="w-2.5 h-2.5" />
-                      {formatRelativeTime(agent.spawnedAt)}
-                    </div>
-                  )}
                 </div>
               );
             })}
           </div>
-        )}
-      </div>
+        </div>
 
-      {/* Activity Feed */}
-      <div className="panel p-4">
-        <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-          <Activity className="w-4 h-4 text-yellow-400" />
-          Live Activity
-          <span className="text-xs text-gray-600 ml-auto">{activityFeed.length} events</span>
-        </h3>
+        {/* Two-column */}
+        <div className="grid gap-5 xl:grid-cols-[1fr_24rem]">
+          {/* Agent Grid */}
+          <div className="panel p-4">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-ink">
+              <Brain className="h-4 w-4 text-accent" aria-hidden="true" />
+              Agent Pool
+              <span className="ml-auto text-xs font-normal text-ink-muted">
+                {subagents.length} total · {activeCount} running · {doneCount} done
+                {errorCount > 0 ? ` · ${errorCount} failed` : ""}
+              </span>
+            </h3>
 
-        <div className="space-y-1 max-h-80 overflow-y-auto">
-          {activityFeed.length === 0 ? (
-            <p className="text-sm text-gray-600 text-center py-4">
-              Activity will appear here as agents work...
-            </p>
-          ) : (
-            [...activityFeed].reverse().map((entry, i) => (
-              <ActivityRow key={i} entry={entry} />
-            ))
-          )}
+            {subagents.length === 0 ? (
+              <EmptyState
+                icon={Brain}
+                title="等待 Pi 派生专业 Agent"
+                description="当前通过工具事件展示 pipeline 进展，Agent 生命周期数据会实时显示。"
+              />
+            ) : (
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 2xl:grid-cols-4">
+                {subagents.map((agent) => {
+                  const Icon = AGENT_ICONS[agent.agentType] || Brain;
+                  return (
+                    <div
+                      key={agent.agentId}
+                      className={cx("rounded-xl border p-3 transition-all duration-200", STATUS_STYLE[agent.status])}
+                    >
+                      <div className="mb-2 flex items-center justify-between">
+                        <Icon
+                          className={cx(
+                            "h-4 w-4",
+                            agent.status === "active"
+                              ? "text-accent"
+                              : agent.status === "done"
+                                ? "text-emerald-600"
+                                : agent.status === "error"
+                                  ? "text-red-500"
+                                  : "text-ink-muted",
+                          )}
+                          aria-hidden="true"
+                        />
+                        <span className={cx("inline-block h-2 w-2 rounded-full", STATUS_DOT[agent.status])} />
+                      </div>
+                      <div className="truncate text-xs font-semibold text-ink">{agent.agentType}</div>
+                      <div className="mt-0.5 truncate text-[11px] text-ink-muted">{agent.target}</div>
+                      {agent.resultCount !== undefined && agent.status === "done" && (
+                        <div className="mt-1 text-[11px] font-medium text-emerald-600">{agent.resultCount} results</div>
+                      )}
+                      {agent.status === "error" && agent.error && (
+                        <div className="mt-1 truncate text-[11px] text-red-500">{agent.error}</div>
+                      )}
+                      {agent.spawnedAt && (
+                        <div className="mt-2 flex items-center gap-1 text-[10px] text-ink-muted">
+                          <Clock className="h-3 w-3" aria-hidden="true" />
+                          {formatRelativeTime(agent.spawnedAt)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Activity Feed */}
+          <div className="panel flex min-h-[28rem] flex-col p-4">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-ink">
+              <Activity className="h-4 w-4 text-accent" aria-hidden="true" />
+              Live Activity
+              <span className="ml-auto text-xs font-normal text-ink-muted">{activityFeed.length} events</span>
+            </h3>
+
+            <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
+              {activityFeed.length === 0 ? (
+                <EmptyState
+                  icon={Activity}
+                  title="暂无活动"
+                  description="搜索、证据、评分和系统日志会在这里实时显示。"
+                />
+              ) : (
+                reversedActivity.map((entry, i) => (
+                  <ActivityRow key={`${entry.timestamp}-${i}-${entry.agentId ?? ""}`} entry={entry} />
+                ))
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
+/* ─── KPI Card ─── */
+function KpiCard({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="panel p-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">{label}</div>
+          <div className="mt-1 font-display text-2xl font-bold text-ink">{value}</div>
+        </div>
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent-soft">
+          <Icon className="h-5 w-5 text-accent" aria-hidden="true" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Activity Row ─── */
 function ActivityRow({ entry }: { entry: import("../../../shared/types.js").ActivityEntry }) {
-  const actionColors: Record<string, string> = {
-    think: "text-purple-400 border-purple-800/30 bg-purple-900/10",
-    search: "text-blue-400 border-blue-800/30 bg-blue-900/10",
-    found: "text-green-400 border-green-800/30 bg-green-900/10",
-    classify: "text-yellow-400 border-yellow-800/30 bg-yellow-900/10",
-    broadcast: "text-cyan-400 border-cyan-800/30 bg-cyan-900/10",
-    upsert: "text-emerald-400 border-emerald-800/30 bg-emerald-900/10",
-    score: "text-orange-400 border-orange-800/30 bg-orange-900/10",
-    audit: "text-pink-400 border-pink-800/30 bg-pink-900/10",
-    export: "text-indigo-400 border-indigo-800/30 bg-indigo-900/10",
-    error: "text-red-400 border-red-800/30 bg-red-900/10",
+  const actionMeta: Record<string, { icon: React.ComponentType<{ className?: string }>; className: string; label: string }> = {
+    think: { icon: Brain, label: "思考", className: "border-purple-200 bg-purple-50/60" },
+    search: { icon: Search, label: "搜索", className: "border-blue-200 bg-blue-50/60" },
+    found: { icon: CheckCircle, label: "发现", className: "border-emerald-200 bg-emerald-50/60" },
+    classify: { icon: Tags, label: "分类", className: "border-amber-200 bg-amber-50/60" },
+    broadcast: { icon: Radio, label: "广播", className: "border-cyan-200 bg-cyan-50/60" },
+    upsert: { icon: UserPlus, label: "入库", className: "border-emerald-200 bg-emerald-50/60" },
+    score: { icon: BarChart3, label: "评分", className: "border-orange-200 bg-orange-50/60" },
+    audit: { icon: Microscope, label: "审计", className: "border-pink-200 bg-pink-50/60" },
+    export: { icon: FileOutput, label: "导出", className: "border-indigo-200 bg-indigo-50/60" },
+    error: { icon: AlertTriangle, label: "错误", className: "border-red-200 bg-red-50/60" },
   };
 
-  const actionIcons: Record<string, string> = {
-    think: "💭",
-    search: "🔍",
-    found: "✅",
-    classify: "🏷️",
-    broadcast: "📡",
-    upsert: "👤",
-    score: "📊",
-    audit: "🔬",
-    export: "📄",
-    error: "❌",
+  const meta = actionMeta[entry.action] || {
+    icon: Activity,
+    label: entry.action,
+    className: "border-rule bg-surface-hover",
   };
+  const Icon = meta.icon;
 
   return (
-    <div className={`flex items-start gap-2 p-1.5 rounded text-xs border ${actionColors[entry.action] || "text-gray-400 border-gray-800/30"}`}>
-      <span className="flex-shrink-0 text-[10px]">{actionIcons[entry.action] || "•"}</span>
-      <span className="text-gray-600 flex-shrink-0 w-14 text-[10px]">
-        {new Date(entry.timestamp).toLocaleTimeString()}
-      </span>
-      {entry.agentType && (
-        <span className="text-gray-500 flex-shrink-0 font-medium text-[10px]">
-          {entry.agentType}:
-        </span>
-      )}
-      <span className="text-gray-300 flex-1 truncate">{entry.message}</span>
-      {entry.detail && (
-        <span className="text-gray-600 flex-shrink-0 text-[10px] truncate max-w-[120px]">
-          {entry.detail}
-        </span>
-      )}
+    <div className={cx("rounded-lg border p-2 text-xs", meta.className)}>
+      <div className="flex items-start gap-2">
+        <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-[10px] text-ink-muted">
+            <span className="font-mono">{new Date(entry.timestamp).toLocaleTimeString()}</span>
+            <span className="font-medium">{meta.label}</span>
+            {entry.agentType && <span className="truncate">{entry.agentType}</span>}
+          </div>
+          <div className="mt-0.5 break-words text-ink-secondary">{entry.message}</div>
+          {entry.detail && (
+            <div className="mt-0.5 truncate text-[11px] text-ink-muted">{entry.detail}</div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -268,10 +301,10 @@ function formatRelativeTime(iso: string): string {
   try {
     const diff = Date.now() - new Date(iso).getTime();
     const secs = Math.floor(diff / 1000);
-    if (secs < 60) return `${secs}s ago`;
+    if (secs < 60) return `${secs}s`;
     const mins = Math.floor(secs / 60);
-    if (mins < 60) return `${mins}m ago`;
-    return `${Math.floor(mins / 60)}h ago`;
+    if (mins < 60) return `${mins}m`;
+    return `${Math.floor(mins / 60)}h`;
   } catch {
     return "";
   }

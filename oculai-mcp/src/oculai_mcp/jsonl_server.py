@@ -37,6 +37,19 @@ if _package_dir not in sys.path:
 
 from oculai_mcp.tools.errors import OculaiError
 
+# Async-safe shutdown flag set by signal handlers
+_shutdown_requested = False
+
+
+def _handle_signal(signum: int, _frame: Any) -> None:
+    """Async-safe signal handler: set a flag for the event loop to pick up.
+
+    Does NOT call sys.exit() or write to stderr — both are unsafe in signal handlers.
+    The main loop polls _shutdown_requested and exits cleanly.
+    """
+    global _shutdown_requested
+    _shutdown_requested = True
+
 
 async def main() -> None:
     """Run the JSONL server on stdin/stdout.
@@ -57,7 +70,7 @@ async def main() -> None:
     await loop.connect_read_pipe(lambda: protocol, sys.stdin)
 
     try:
-        while True:
+        while not _shutdown_requested:
             line = await reader.readline()
             if not line:
                 # EOF — stdin closed, graceful shutdown
@@ -122,8 +135,13 @@ async def main() -> None:
     except asyncio.CancelledError:
         _emit_system({"type": "shutdown", "reason": "cancelled"})
     finally:
+        if _shutdown_requested:
+            _emit_system({"type": "shutdown", "reason": "signal received"})
         # Give the event loop a moment to flush
-        await asyncio.sleep(0.1)
+        try:
+            await asyncio.wait_for(asyncio.sleep(0.1), timeout=1.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            pass
 
 
 def _emit_system(msg: dict[str, Any]) -> None:
@@ -136,12 +154,6 @@ def _emit_response(msg: dict[str, Any]) -> None:
     """Write a tool response to stdout (JSONL)."""
     sys.stdout.write(json.dumps(msg, ensure_ascii=False, default=str) + "\n")
     sys.stdout.flush()
-
-
-def _handle_signal(signum: int, _frame: Any) -> None:
-    """Handle SIGTERM/SIGINT gracefully."""
-    _emit_system({"type": "shutdown", "reason": f"signal {signum}"})
-    sys.exit(0)
 
 
 if __name__ == "__main__":

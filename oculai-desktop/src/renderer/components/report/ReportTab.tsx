@@ -1,23 +1,38 @@
 import { useStore } from "../../store/index.js";
-import { Download, FileText } from "lucide-react";
+import { Download, FileText, RefreshCcw } from "lucide-react";
+import { useState } from "react";
+import { EmptyState, LoadingInline } from "../ui/primitives.js";
 
 export function ReportTab() {
   const reportHtml = useStore((s) => s.reportHtml);
   const activeRunId = useStore((s) => s.activeRunId);
+  const setReportHtml = useStore((s) => s.setReportHtml);
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleExport = async () => {
     if (!activeRunId) return;
+    setExporting(true);
+    setError(null);
     try {
       const result = await window.oculai.exportReport({
         runId: activeRunId,
         format: "html",
       });
-      const data = result as { html_content?: string };
-      if (data.html_content) {
-        useStore.getState().setReportHtml(data.html_content);
+      const data = result as { html_content?: string; html?: string };
+      const html = data.html_content ?? data.html;
+      if (html) {
+        // IPC event (report:ready) may have already set this; ensure it's set
+        if (!useStore.getState().reportHtml) {
+          setReportHtml(html);
+        }
+      } else {
+        setError("报告导出成功但没有返回 HTML 内容。");
       }
     } catch (err) {
-      console.error("Export failed:", err);
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -34,55 +49,74 @@ export function ReportTab() {
 
   if (!reportHtml) {
     return (
-      <div className="h-full flex items-center justify-center">
-        <div className="text-center">
-          <FileText className="w-16 h-16 text-gray-700 mx-auto mb-4" />
-          <h2 className="text-lg font-semibold text-gray-300 mb-2">
-            Report Not Generated
-          </h2>
-          <p className="text-sm text-gray-500 mb-4 max-w-sm">
-            The final report will be available after the pipeline completes
-            (evaluation + audit phases). You can also export manually.
+      <div className="h-full">
+        <EmptyState
+          icon={FileText}
+          title="报告尚未生成"
+          description="评估与审计完成后自动生成；也可手动导出当前结果。"
+          action={
+            activeRunId && (
+              <button className="btn-primary" onClick={handleExport} disabled={exporting} type="button">
+                {exporting ? (
+                  <LoadingInline label="生成中" />
+                ) : (
+                  <>
+                    <Download className="h-4 w-4" aria-hidden="true" />
+                    生成报告
+                  </>
+                )}
+              </button>
+            )
+          }
+        />
+        {error && (
+          <p className="px-6 text-center text-sm text-semantic-error" role="alert">
+            {error}
           </p>
-          {activeRunId && (
-            <button className="btn-primary flex items-center gap-2 mx-auto" onClick={handleExport}>
-              <Download className="w-4 h-4" />
-              Generate Report Now
-            </button>
-          )}
-        </div>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="flex items-center justify-between p-3 bg-gray-900 border-b border-gray-800">
-        <span className="text-sm text-gray-400">
-          HTML Report Preview
-        </span>
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between border-b border-rule bg-surface px-4 py-2.5">
+        <div>
+          <span className="text-sm font-semibold text-ink">HTML 报告预览</span>
+          <p className="text-[11px] text-ink-muted">静态沙箱预览；下载后可独立打开。</p>
+        </div>
         <div className="flex items-center gap-2">
+          {error && (
+            <span className="text-xs text-semantic-error" role="alert">
+              {error}
+            </span>
+          )}
           <button
-            className="btn-secondary flex items-center gap-1 text-xs"
+            className="btn-secondary text-xs"
             onClick={handleExport}
+            disabled={exporting}
+            type="button"
           >
-            <Download className="w-3.5 h-3.5" />
-            Regenerate
+            {exporting ? (
+              <LoadingInline label="刷新中" />
+            ) : (
+              <>
+                <RefreshCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                重新生成
+              </>
+            )}
           </button>
-          <button
-            className="btn-primary flex items-center gap-1 text-xs"
-            onClick={handleDownload}
-          >
-            <Download className="w-3.5 h-3.5" />
-            Download HTML
+          <button className="btn-primary text-xs" onClick={handleDownload} type="button">
+            <Download className="h-3.5 w-3.5" aria-hidden="true" />
+            下载 HTML
           </button>
         </div>
       </div>
-      <div className="flex-1">
+      <div className="min-h-0 flex-1 bg-white">
         <iframe
           srcDoc={reportHtml}
-          className="w-full h-full border-0"
-          sandbox="allow-scripts allow-same-origin"
+          className="h-full w-full border-0"
+          sandbox="allow-same-origin"
           title="Oculai Report"
         />
       </div>

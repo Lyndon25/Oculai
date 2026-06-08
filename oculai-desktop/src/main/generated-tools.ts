@@ -6,6 +6,19 @@ export const OCULAI_TOOLS: Record<
   { description: string; parameters: Record<string, unknown> }
 > = {
 
+  // Generated Drift Fix
+  oculai_apply_audit_adjustments: {
+    description: "Apply auditor-recommended score adjustments with history tracking.",
+    parameters: {
+      type: "object",
+      properties: {
+        session_id: { type: "string" },
+        adjustments: { type: "string" }
+      },
+      required: ["session_id", "adjustments"],
+    },
+  },
+
   // Evidence Tools
   oculai_attach_evidence: {
     description: "Attach a piece of evidence to a candidate.",
@@ -25,6 +38,21 @@ export const OCULAI_TOOLS: Record<
         metadata: { type: "string" }
       },
       required: ["person_id", "evidence_type", "title", "source_name"],
+    },
+  },
+
+  // Generated Drift Fix
+  oculai_broadcast_discovery: {
+    description: "Broadcast a discovery to all parallel agents in this run.",
+    parameters: {
+      type: "object",
+      properties: {
+        run_id: { type: "string" },
+        discovery_type: { type: "string" },
+        content: { type: "string" },
+        discovered_by_agent: { type: "string" }
+      },
+      required: ["run_id", "discovery_type", "content", "discovered_by_agent"],
     },
   },
 
@@ -70,6 +98,34 @@ export const OCULAI_TOOLS: Record<
     },
   },
 
+  // Generated Drift Fix
+  oculai_claim_tasks: {
+    description: "Claim pending tasks for a subagent to execute.",
+    parameters: {
+      type: "object",
+      properties: {
+        run_id: { type: "string" },
+        task_types: { type: "string" },
+        agent_id: { type: "string" },
+        limit: { type: "integer" }
+      },
+      required: ["run_id", "task_types", "agent_id"],
+    },
+  },
+  // Generated Drift Fix
+  oculai_complete_task: {
+    description: "Mark a task as completed with output data.",
+    parameters: {
+      type: "object",
+      properties: {
+        task_id: { type: "string" },
+        output_data: { type: "string" },
+        agent_id: { type: "string" }
+      },
+      required: ["task_id", "output_data", "agent_id"],
+    },
+  },
+
   // Source Tools
   oculai_crawl_site: {
     description: "Crawl a website starting from a URL to discover deep candidate evidence.",
@@ -105,6 +161,20 @@ export const OCULAI_TOOLS: Record<
     },
   },
 
+  // Generated Drift Fix
+  oculai_create_review_session: {
+    description: "Create a multi-pass review session for a run's candidate pool.",
+    parameters: {
+      type: "object",
+      properties: {
+        run_id: { type: "string" },
+        role_type: { type: "string" },
+        candidate_ids: { type: "string" }
+      },
+      required: ["run_id"],
+    },
+  },
+
   // Run Lifecycle
   oculai_create_run: {
     description: "Create a new talent sourcing run.",
@@ -135,6 +205,20 @@ export const OCULAI_TOOLS: Record<
     },
   },
 
+  // Generated Drift Fix
+  oculai_execute_review_pass: {
+    description: "Advance a review session to the next pass.",
+    parameters: {
+      type: "object",
+      properties: {
+        session_id: { type: "string" },
+        pass_type: { type: "string" },
+        completed_candidate_ids: { type: "string" }
+      },
+      required: ["session_id", "pass_type"],
+    },
+  },
+
   // Review Orchestrator
   oculai_export_report: {
     description: "Export a sourcing run report in HTML (default) or Markdown format.",
@@ -148,6 +232,20 @@ export const OCULAI_TOOLS: Record<
     },
   },
 
+  // Generated Drift Fix
+  oculai_fail_task: {
+    description: "Mark a task as failed.",
+    parameters: {
+      type: "object",
+      properties: {
+        task_id: { type: "string" },
+        error_message: { type: "string" },
+        agent_id: { type: "string" }
+      },
+      required: ["task_id", "error_message"],
+    },
+  },
+
   // Source Tools
   oculai_fetch_source_detail: {
     description: "Fetch detailed information for a single candidate from a source.",
@@ -158,6 +256,30 @@ export const OCULAI_TOOLS: Record<
         external_id: { type: "string" }
       },
       required: ["source_name", "external_id"],
+    },
+  },
+
+  // Generated Drift Fix
+  oculai_finalize_review_session: {
+    description: "Mark a review session as complete and compute final rankings.",
+    parameters: {
+      type: "object",
+      properties: {
+        session_id: { type: "string" }
+      },
+      required: ["session_id"],
+    },
+  },
+  // Generated Drift Fix
+  oculai_get_broadcasts: {
+    description: "Get all unconsumed broadcasts from other agents in this run.",
+    parameters: {
+      type: "object",
+      properties: {
+        run_id: { type: "string" },
+        agent_id: { type: "string" }
+      },
+      required: ["run_id", "agent_id"],
     },
   },
 
@@ -215,6 +337,18 @@ export const OCULAI_TOOLS: Record<
     },
   },
 
+  // Generated Drift Fix
+  oculai_get_review_progress: {
+    description: "Get current review session progress.",
+    parameters: {
+      type: "object",
+      properties: {
+        session_id: { type: "string" }
+      },
+      required: ["session_id"],
+    },
+  },
+
   // Run Lifecycle
   oculai_get_run_state: {
     description: "Get the current state of a sourcing run.",
@@ -265,6 +399,18 @@ export const OCULAI_TOOLS: Record<
         limit: { type: "integer" }
       },
       required: ["run_id"],
+    },
+  },
+
+  // Generated Drift Fix
+  oculai_get_task_iterations: {
+    description: "Get all recorded iterations for a task, ordered by step number.",
+    parameters: {
+      type: "object",
+      properties: {
+        task_id: { type: "string" }
+      },
+      required: ["task_id"],
     },
   },
 
@@ -337,6 +483,27 @@ export const OCULAI_TOOLS: Record<
         role_type: { type: "string" }
       },
       required: ["run_id", "person_id", "assessor_agent", "dimension", "score"],
+    },
+  },
+
+  // Generated Drift Fix
+  oculai_record_iteration: {
+    description: "Persist one step of an agent's reasoning loop to the database.",
+    parameters: {
+      type: "object",
+      properties: {
+        task_id: { type: "string" },
+        iteration_number: { type: "integer" },
+        iteration_type: { type: "string" },
+        reasoning_text: { type: "string" },
+        action_taken: { type: "string" },
+        action_params: { type: "string" },
+        observation_text: { type: "string" },
+        observation_data: { type: "string" },
+        decision: { type: "string" },
+        decision_rationale: { type: "string" }
+      },
+      required: ["task_id", "iteration_number", "iteration_type"],
     },
   },
 

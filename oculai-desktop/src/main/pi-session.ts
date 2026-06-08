@@ -9,16 +9,7 @@
  *
  * Reference: pi-windows-x64/examples/sdk/12-full-control.ts
  */
-import { getModel } from "@earendil-works/pi-ai";
-import {
-  AuthStorage,
-  createAgentSession,
-  createExtensionRuntime,
-  ModelRegistry,
-  type ResourceLoader,
-  SessionManager,
-  SettingsManager,
-} from "@earendil-works/pi-coding-agent";
+import "./runtime-compat.js";
 import { app } from "electron";
 import { join } from "path";
 import { existsSync, mkdirSync } from "fs";
@@ -29,8 +20,18 @@ import { PostgresManager } from "./postgres-manager.js";
 import { getOculaiSystemPrompt } from "../shared/prompts.js";
 import { OCULAI_TOOLS } from "./generated-tools.js";
 
-let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | null = null;
+let session: any = null;
 let agentDir: string;
+let createExtensionRuntimeImpl: any = null;
+
+async function loadPiRuntime() {
+  const [{ getModel }, sdk] = await Promise.all([
+    import("@earendil-works/pi-ai"),
+    import("@earendil-works/pi-coding-agent"),
+  ]);
+  createExtensionRuntimeImpl = sdk.createExtensionRuntime;
+  return { getModel, ...sdk };
+}
 
 export function getSession() {
   return session;
@@ -44,6 +45,14 @@ export async function initPiSession(
   toolBridge: ToolBridge,
   postgresManager: PostgresManager,
 ): Promise<void> {
+  const {
+    getModel,
+    AuthStorage,
+    createAgentSession,
+    ModelRegistry,
+    SessionManager,
+    SettingsManager,
+  } = await loadPiRuntime();
   const settings = getSettingsStore();
   const userData = app.getPath("userData");
   agentDir = join(userData, "pi-agent");
@@ -251,7 +260,7 @@ const oculaiAgentFiles = getOculaiAgentFiles();
 
   // ---- Resource Loader (custom for Oculai) ----
   const systemPrompt = getOculaiSystemPrompt(postgresManager.getConnectionString());
-  const resourceLoader: ResourceLoader = {
+  const resourceLoader = {
     getExtensions: () => ({
       extensions: [],
       errors: [],
@@ -272,7 +281,7 @@ const oculaiAgentFiles = getOculaiAgentFiles();
     cwd: app.getPath("userData"),
     agentDir,
     model,
-    thinkingLevel: settings.get("thinkingLevel") === "off" ? "off" : "medium",
+    thinkingLevel: settings.get("thinkingLevel"),
     authStorage,
     modelRegistry,
     resourceLoader,
@@ -293,14 +302,22 @@ const oculaiAgentFiles = getOculaiAgentFiles();
         stateBus.emitThinking(msgEvent.delta);
       }
     } else if (event.type === "tool_execution_start") {
+      const params = event.toolCall.arguments as Record<string, unknown>;
       stateBus.emitToolCall(
         event.toolCall.name,
-        event.toolCall.arguments as Record<string, unknown>,
+        params,
       );
+      emitDashboardSignalForToolStart(event.toolCall.name, params);
     } else if (event.type === "tool_execution_end") {
       const result = event.toolResult?.result as Record<string, unknown> | undefined;
       stateBus.emitToolResult(
         event.toolCall.name,
+        result || {},
+        event.toolResult?.isError || false,
+      );
+      emitDashboardSignalForToolEnd(
+        event.toolCall.name,
+        event.toolCall.arguments as Record<string, unknown>,
         result || {},
         event.toolResult?.isError || false,
       );
@@ -310,12 +327,146 @@ const oculaiAgentFiles = getOculaiAgentFiles();
   stateBus.emitSystemLog("info", `Pi AgentSession initialized with model ${modelName}`);
 }
 
+const TOOL_PHASES: Record<string, string> = {
+  oculai_create_run: "init",
+  oculai_list_source_capabilities: "strategy",
+  oculai_checkpoint_plan: "strategy",
+  oculai_search_source: "searching",
+  oculai_fetch_source_detail: "searching",
+  oculai_deep_search: "searching",
+  oculai_upsert_candidate: "searching",
+  oculai_upsert_candidates_batch: "searching",
+  oculai_link_identity: "identity_resolution",
+  oculai_get_candidate: "enrichment",
+  oculai_capture_page_evidence: "enrichment",
+  oculai_attach_evidence: "enrichment",
+  oculai_get_evidence: "enrichment",
+  oculai_record_assessment: "evaluation",
+  oculai_score_candidate: "evaluation",
+  oculai_create_review_session: "audit",
+  oculai_finalize_review_session: "shortlist",
+  oculai_export_report: "complete",
+  oculai_create_outreach_draft: "outreach",
+  oculai_request_human_approval: "outreach",
+};
+
+const TOOL_ACTIONS: Record<string, string> = {
+  oculai_record_iteration: "think",
+  oculai_search_source: "search",
+  oculai_fetch_source_detail: "search",
+  oculai_deep_search: "search",
+  oculai_broadcast_discovery: "broadcast",
+  oculai_upsert_candidate: "upsert",
+  oculai_upsert_candidates_batch: "upsert",
+  oculai_attach_evidence: "found",
+  oculai_record_assessment: "score",
+  oculai_score_candidate: "score",
+  oculai_create_review_session: "audit",
+  oculai_finalize_review_session: "audit",
+  oculai_export_report: "export",
+};
+
+function getRunId(params: Record<string, unknown>, result?: Record<string, unknown>): string | null {
+  const value = params.run_id ?? params.runId ?? result?.run_id ?? result?.runId;
+  return value ? String(value) : null;
+}
+
+function parseToolResult(result: Record<string, unknown>): Record<string, unknown> {
+  const content = result?.content;
+  if (Array.isArray(content)) {
+    const first = content[0] as { text?: unknown } | undefined;
+    if (typeof first?.text === "string") {
+      try {
+        return JSON.parse(first.text) as Record<string, unknown>;
+      } catch {
+        return result;
+      }
+    }
+  }
+  return result;
+}
+
+function toolLabel(name: string): string {
+  return name.replace(/^oculai_/, "").replace(/_/g, " ");
+}
+
+function emitDashboardSignalForToolStart(name: string, params: Record<string, unknown>): void {
+  const runId = getRunId(params);
+  const phase = TOOL_PHASES[name];
+  if (runId && phase) {
+    stateBus.emitPhaseChange(runId, phase as never);
+  }
+
+  const action = TOOL_ACTIONS[name];
+  if (runId && action) {
+    stateBus.emitSubagentProgress(`tool:${name}`, {
+      timestamp: new Date().toISOString(),
+      agentId: `tool:${name}`,
+      agentType: "Oculai Tool",
+      action: action as never,
+      message: `开始执行 ${toolLabel(name)}`,
+      detail: typeof params.source_name === "string" ? params.source_name : undefined,
+    });
+  }
+}
+
+function emitDashboardSignalForToolEnd(
+  name: string,
+  params: Record<string, unknown>,
+  rawResult: Record<string, unknown>,
+  isError: boolean,
+): void {
+  const result = parseToolResult(rawResult);
+  const runId = getRunId(params, result);
+  const action = isError ? "error" : TOOL_ACTIONS[name];
+
+  if (runId && action) {
+    stateBus.emitSubagentProgress(`tool:${name}`, {
+      timestamp: new Date().toISOString(),
+      agentId: `tool:${name}`,
+      agentType: "Oculai Tool",
+      action: action as never,
+      message: isError ? `${toolLabel(name)} 执行失败` : `${toolLabel(name)} 执行完成`,
+      detail: isError ? "查看 Logs" : undefined,
+    });
+  }
+
+  if (!isError && name === "oculai_upsert_candidate") {
+    const personData = (params.person_data || {}) as Record<string, unknown>;
+    const personId = String(result.person_id || "");
+    if (personId) {
+      stateBus.emitCandidateUpserted(
+        personId,
+        String(personData.name || result.name || "Unknown candidate"),
+        typeof personData.institution === "string" ? personData.institution : undefined,
+        typeof params.source_name === "string" ? params.source_name : undefined,
+      );
+    }
+  }
+
+  if (!isError && name === "oculai_upsert_candidates_batch" && Array.isArray(result.accepted)) {
+    for (const accepted of result.accepted as Array<Record<string, unknown>>) {
+      const personId = String(accepted.person_id || "");
+      if (!personId) continue;
+      stateBus.emitCandidateUpserted(
+        personId,
+        String(accepted.name || "Unknown candidate"),
+        undefined,
+        typeof params.source_name === "string" ? params.source_name : undefined,
+      );
+    }
+  }
+}
+
 /**
  * Create a Pi extension runtime that registers all Oculai tools.
  * Each tool delegates to the Python sidecar via ToolBridge.
  */
 function createOculaiExtensionRuntime(bridge: ToolBridge) {
-  const runtime = createExtensionRuntime();
+  if (!createExtensionRuntimeImpl) {
+    throw new Error("Pi extension runtime is not loaded");
+  }
+  const runtime = createExtensionRuntimeImpl();
 
   // Register all 41 Oculai tools
   for (const [name, schema] of Object.entries(OCULAI_TOOLS)) {

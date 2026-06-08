@@ -1,76 +1,68 @@
 import { useStore } from "../../store/index.js";
 import { Plus, Clock, Settings, ChevronRight } from "lucide-react";
+import { RunStatusBadge, cx } from "../ui/primitives.js";
 
 export function Sidebar() {
   const runs = useStore((s) => s.runs);
   const activeRunId = useStore((s) => s.activeRunId);
   const setActiveRun = useStore((s) => s.setActiveRun);
   const setSettingsOpen = useStore((s) => s.setSettingsOpen);
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "running":
-        return "badge-green";
-      case "completed":
-        return "badge-blue";
-      case "draft":
-        return "badge-gray";
-      case "aborted":
-        return "badge-red";
-      default:
-        return "badge-gray";
-    }
-  };
+  const resetRunScopedState = useStore((s) => s.resetRunScopedState);
 
   return (
-    <div className="w-56 bg-gray-900 border-r border-gray-800 flex flex-col">
-      {/* New Run button */}
+    <aside className="flex w-56 shrink-0 flex-col border-r border-rule bg-canvas">
+      {/* New Run */}
       <div className="p-3">
         <button
-          className="w-full flex items-center justify-center gap-2 btn-primary"
-          onClick={() => setActiveRun(null)}
+          type="button"
+          className="btn-primary w-full"
+          onClick={() => {
+            resetRunScopedState();
+            setActiveRun(null);
+          }}
         >
-          <Plus className="w-4 h-4" />
-          <span>New Sourcing Run</span>
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          <span>新建任务</span>
         </button>
       </div>
 
-      {/* Run history */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="px-3 py-2">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1">
-            <Clock className="w-3 h-3" /> History
+      {/* History */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+        <div className="px-2 py-2">
+          <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-ink-muted">
+            <Clock className="h-3 w-3" aria-hidden="true" />
+            历史
           </h3>
         </div>
-        <div className="space-y-0.5 px-2">
+
+        <div className="space-y-1">
           {runs.length === 0 ? (
-            <p className="text-xs text-gray-600 px-2 py-4 text-center">
-              No runs yet. Start your first talent sourcing run!
-            </p>
+            <div className="rounded-xl border border-dashed border-rule px-3 py-8 text-center">
+              <p className="text-xs leading-5 text-ink-muted">
+                暂无任务
+              </p>
+            </div>
           ) : (
             runs.map((run) => (
               <button
                 key={run.run_id}
+                type="button"
                 onClick={() => setActiveRun(run.run_id)}
-                className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                className={cx(
+                  "w-full rounded-xl border px-3 py-2.5 text-left transition-colors duration-150",
                   activeRunId === run.run_id
-                    ? "bg-blue-600/20 text-blue-300 border border-blue-800/50"
-                    : "hover:bg-gray-800 text-gray-400 hover:text-gray-200"
-                }`}
+                    ? "border-accent/30 bg-accent-soft"
+                    : "border-transparent text-ink-secondary hover:border-rule hover:bg-surface-hover hover:text-ink",
+                )}
               >
-                <div className="flex items-center justify-between">
-                  <span className="truncate font-medium">{run.title}</span>
-                  <ChevronRight className="w-3 h-3 flex-shrink-0 opacity-50" />
-                </div>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className={`badge text-[10px] ${getStatusBadge(run.status)}`}>
-                    {run.status}
+                <div className="flex items-start justify-between gap-2">
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">
+                    {run.title}
                   </span>
-                  {run.candidate_count !== undefined && (
-                    <span className="text-[10px] text-gray-600">
-                      {run.candidate_count} candidates
-                    </span>
-                  )}
+                  <ChevronRight className="mt-0.5 h-3 w-3 shrink-0 opacity-40" aria-hidden="true" />
+                </div>
+                <div className="mt-1.5">
+                  <RunStatusBadge status={run.status} />
                 </div>
               </button>
             ))
@@ -79,15 +71,16 @@ export function Sidebar() {
       </div>
 
       {/* Settings */}
-      <div className="p-3 border-t border-gray-800">
+      <div className="border-t border-rule p-3">
         <button
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-gray-400 hover:bg-gray-800 hover:text-gray-200 transition-colors"
+          type="button"
+          className="btn-ghost w-full justify-start text-xs"
           onClick={() => setSettingsOpen(true)}
         >
-          <Settings className="w-4 h-4" />
-          <span>Settings</span>
+          <Settings className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>设置</span>
         </button>
       </div>
-    </div>
+    </aside>
   );
 }

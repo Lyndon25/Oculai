@@ -10,7 +10,7 @@ from typing import Any
 
 from oculai_mcp.config import get_settings
 from oculai_mcp.db.provenance import log_source_call
-from oculai_mcp.db.quotas import check_quota, consume_quota
+from oculai_mcp.db.quotas import check_quota, try_consume_quota
 from oculai_mcp.sources.base import HealthStatus, IDataSource, RawCandidate, SearchQuery
 from oculai_mcp.sources.github_api import GitHubAPISource
 
@@ -102,7 +102,7 @@ class IndustrySource(IDataSource):
             for c in raw_candidates:
                 enriched.append(self._enrich_candidate(c))
 
-            await consume_quota(self.name, amount=len(enriched))
+            await try_consume_quota(self.name, amount=len(enriched))
             duration_ms = int((time.perf_counter() - start) * 1000)
             await log_source_call(
                 source_name=self.name,

@@ -40,6 +40,7 @@ export const IPC_CHANNELS = {
   LIST_RUNS: "action:listRuns",
   SETTINGS_GET: "settings:get",
   SETTINGS_SET: "settings:set",
+  SETTINGS_SET_API_KEY: "settings:setApiKey",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

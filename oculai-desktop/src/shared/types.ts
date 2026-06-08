@@ -15,6 +15,7 @@ export interface SourcingRun {
 export type RunStatus = "draft" | "running" | "paused" | "reviewing" | "completed" | "aborted";
 
 export interface Candidate {
+  record_id?: string;
   person_id: string;
   canonical_name: string;
   latest_institution?: string;
@@ -28,6 +29,7 @@ export interface Candidate {
   github_id?: string;
   google_scholar_id?: string;
   identities?: PersonIdentity[];
+  created_at?: string;
 }
 
 export type CandidateStatus =

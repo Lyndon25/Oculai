@@ -1,7 +1,9 @@
 import { useStore } from "../../store/index.js";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import type React from "react";
 import type { Candidate, CandidateDetail } from "../../../shared/types.js";
-import { ExternalLink, Star, MapPin, BookOpen, Code } from "lucide-react";
+import { ExternalLink, Star, MapPin, BookOpen, Code, Search, UserRound, BriefcaseBusiness } from "lucide-react";
+import { EmptyState, EvidenceTierBadge, LoadingInline, ScorePill, cx } from "../ui/primitives.js";
 
 export function CandidatesTab() {
   const candidates = useStore((s) => s.candidates);
@@ -10,8 +12,8 @@ export function CandidatesTab() {
   const activeRunId = useStore((s) => s.activeRunId);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState("");
+  const loadingPersonId = useRef<string | null>(null);
 
-  // Fetch candidates on mount
   useEffect(() => {
     if (!activeRunId) return;
     setLoading(true);
@@ -27,111 +29,140 @@ export function CandidatesTab() {
   }, [activeRunId]);
 
   const handleSelectCandidate = async (personId: string) => {
+    loadingPersonId.current = personId;
     setLoading(true);
     try {
       const detail = await window.oculai.getCandidateDetail({ personId });
-      setSelectedCandidate(detail as CandidateDetail);
-    } catch {
-      // Candidate already selected or error
+      // Only apply if this is still the most recently requested candidate
+      if (loadingPersonId.current === personId) {
+        setSelectedCandidate((detail as CandidateDetail | null) ?? null);
+      }
     } finally {
-      setLoading(false);
+      if (loadingPersonId.current === personId) {
+        setLoading(false);
+      }
     }
   };
 
-  const filtered = filter
-    ? candidates.filter(
-        (c) =>
-          c.canonical_name.toLowerCase().includes(filter.toLowerCase()) ||
-          c.latest_institution?.toLowerCase().includes(filter.toLowerCase()),
-      )
-    : candidates;
-
-  const getScoreColor = (score?: number) => {
-    if (!score) return "text-gray-600";
-    if (score >= 80) return "text-green-400";
-    if (score >= 60) return "text-yellow-400";
-    if (score >= 40) return "text-orange-400";
-    return "text-red-400";
-  };
+  const normalizedFilter = filter.trim().toLowerCase();
+  const filtered = useMemo(() => {
+    const base = normalizedFilter
+      ? candidates.filter((c) => {
+          const haystack = [c.canonical_name, c.latest_institution, c.latest_position, ...(c.research_areas ?? [])]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          return haystack.includes(normalizedFilter);
+        })
+      : candidates;
+    return [...base].sort((a, b) => (b.quality_score ?? -1) - (a.quality_score ?? -1));
+  }, [candidates, normalizedFilter]);
 
   return (
-    <div className="h-full flex">
+    <div className="flex h-full min-w-0">
       {/* Left: Candidate List */}
-      <div className="w-80 border-r border-gray-800 flex flex-col">
-        <div className="p-3 border-b border-gray-800">
-          <input
-            type="text"
-            className="input text-xs"
-            placeholder="Filter by name or institution..."
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
-          <p className="text-[10px] text-gray-600 mt-1">
-            {filtered.length} of {candidates.length} candidates
+      <div className="flex w-80 shrink-0 flex-col border-r border-rule xl:w-96">
+        <div className="border-b border-rule p-3">
+          <label htmlFor="candidate-filter" className="sr-only">筛选候选人</label>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-ink-muted" aria-hidden="true" />
+            <input
+              id="candidate-filter"
+              type="text"
+              className="input pl-9 text-xs"
+              placeholder="按姓名、机构、职位筛选…"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+          </div>
+          <p className="mt-1 text-[11px] text-ink-muted">
+            {filtered.length} / {candidates.length}
           </p>
         </div>
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {loading && candidates.length === 0 ? (
-            <p className="text-sm text-gray-600 p-4 text-center">Loading candidates...</p>
+            <div className="p-4 text-center"><LoadingInline label="加载中" /></div>
           ) : filtered.length === 0 ? (
-            <p className="text-sm text-gray-600 p-4 text-center">
-              {candidates.length === 0
-                ? "No candidates found yet. Search phase will populate this list."
-                : "No matches for filter."}
-            </p>
+            <EmptyState
+              icon={UserRound}
+              title={candidates.length === 0 ? "暂无候选人" : "无匹配结果"}
+              description={candidates.length === 0 ? "搜索阶段会实时填充候选人列表。" : "尝试减少筛选关键词。"}
+            />
           ) : (
-            filtered.map((c) => (
-              <button
-                key={c.person_id}
-                onClick={() => handleSelectCandidate(c.person_id)}
-                className={`w-full text-left p-3 border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors ${
-                  selectedCandidate?.person_id === c.person_id
-                    ? "bg-blue-600/10 border-l-2 border-l-blue-500"
-                    : ""
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-gray-200 truncate">
-                    {c.canonical_name}
-                  </span>
-                  {c.quality_score !== undefined && (
-                    <span className={`text-xs font-bold ${getScoreColor(c.quality_score)}`}>
-                      {c.quality_score}
-                    </span>
-                  )}
-                </div>
-                {c.latest_institution && (
-                  <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
-                    <MapPin className="w-3 h-3" />
-                    {c.latest_institution}
-                  </p>
-                )}
-                {c.research_areas && c.research_areas.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {c.research_areas.slice(0, 3).map((area, i) => (
-                      <span key={i} className="text-[10px] px-1.5 py-0.5 bg-gray-800 rounded text-gray-500">
-                        {area}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </button>
+            filtered.map((candidate) => (
+              <CandidateListItem
+                key={candidate.person_id}
+                candidate={candidate}
+                selected={selectedCandidate?.person_id === candidate.person_id}
+                onSelect={() => handleSelectCandidate(candidate.person_id)}
+              />
             ))
           )}
         </div>
       </div>
 
-      {/* Right: Candidate Detail */}
-      <div className="flex-1 overflow-y-auto p-6">
+      {/* Right: Detail */}
+      <div className="min-w-0 flex-1 overflow-y-auto p-5">
         {!selectedCandidate ? (
-          <div className="h-full flex items-center justify-center text-gray-600 text-sm">
-            Select a candidate to view details
-          </div>
+          <EmptyState
+            icon={UserRound}
+            title="选择候选人查看详情"
+            description="右侧展示身份、证据、评分与论文等结构化信息。"
+          />
         ) : (
           <CandidateDetailView candidate={selectedCandidate} />
         )}
       </div>
     </div>
+  );
+}
+
+function CandidateListItem({
+  candidate,
+  selected,
+  onSelect,
+}: {
+  candidate: Candidate;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cx(
+        "w-full border-b border-rule p-3 text-left transition-colors hover:bg-surface-hover",
+        selected && "border-l-2 border-l-accent bg-accent-soft",
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-ink">{candidate.canonical_name}</div>
+          {candidate.latest_institution && (
+            <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-ink-muted">
+              <MapPin className="h-3 w-3 shrink-0" aria-hidden="true" />
+              {candidate.latest_institution}
+            </p>
+          )}
+          {candidate.latest_position && (
+            <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-ink-muted">
+              <BriefcaseBusiness className="h-3 w-3 shrink-0" aria-hidden="true" />
+              {candidate.latest_position}
+            </p>
+          )}
+        </div>
+        <ScorePill score={candidate.quality_score} />
+      </div>
+      {candidate.research_areas && candidate.research_areas.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {candidate.research_areas.slice(0, 3).map((area) => (
+            <span key={area} className="rounded-full bg-surface-hover px-2 py-0.5 text-[10px] text-ink-muted">
+              {area}
+            </span>
+          ))}
+        </div>
+      )}
+    </button>
   );
 }
 
@@ -141,146 +172,170 @@ function CandidateDetailView({ candidate }: { candidate: CandidateDetail }) {
   const works = candidate.academic_works || [];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header */}
-      <div>
-        <h2 className="text-xl font-bold text-gray-100">{candidate.canonical_name}</h2>
-        <div className="flex items-center gap-3 mt-1">
-          {candidate.latest_institution && (
-            <span className="text-sm text-gray-400 flex items-center gap-1">
-              <MapPin className="w-3.5 h-3.5" />
-              {candidate.latest_institution}
-            </span>
-          )}
-          {candidate.latest_position && (
-            <span className="text-sm text-gray-400">{candidate.latest_position}</span>
-          )}
-          {candidate.quality_score !== undefined && (
-            <span className={`badge ${
-              candidate.quality_score >= 80
-                ? "badge-green"
-                : candidate.quality_score >= 60
-                  ? "badge-yellow"
-                  : "badge-red"
-            }`}>
-              Score: {candidate.quality_score}/100
-            </span>
-          )}
+      <div className="panel p-5">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0">
+            <h2 className="truncate font-display text-2xl font-bold text-ink">{candidate.canonical_name}</h2>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              {candidate.latest_institution && (
+                <span className="flex items-center gap-1 text-sm text-ink-secondary">
+                  <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
+                  {candidate.latest_institution}
+                </span>
+              )}
+              {candidate.latest_position && (
+                <span className="text-sm text-ink-secondary">{candidate.latest_position}</span>
+              )}
+              <ScorePill score={candidate.quality_score} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:w-[26rem]">
+            <StatCard icon={BookOpen} label="Papers" value={candidate.total_papers} />
+            <StatCard icon={Star} label="H-Index" value={candidate.h_index} />
+            <StatCard icon={Star} label="Citations" value={candidate.total_citations} />
+            <StatCard icon={Code} label="Identities" value={candidate.identities?.length} />
+          </div>
         </div>
-      </div>
-
-      {/* Stats bar */}
-      <div className="grid grid-cols-4 gap-4">
-        <StatCard icon={BookOpen} label="Papers" value={candidate.total_papers} />
-        <StatCard icon={Star} label="H-Index" value={candidate.h_index} />
-        <StatCard icon={Star} label="Citations" value={candidate.total_citations} />
-        <StatCard icon={Code} label="Identities" value={candidate.identities?.length} />
       </div>
 
       {/* Identities */}
       {candidate.identities && candidate.identities.length > 0 && (
-        <div className="panel p-4">
-          <h3 className="panel-header -mx-4 -mt-4 mb-3">External Identities</h3>
-          <div className="space-y-2">
+        <Section title={`外部身份 (${candidate.identities.length})`}>
+          <div className="grid gap-2">
             {candidate.identities.map((id, i) => (
-              <div key={i} className="flex items-center justify-between text-sm">
-                <span className="text-gray-400">{id.source_type}</span>
+              <div
+                key={`${id.source_type}-${id.external_id}-${i}`}
+                className="flex items-center justify-between gap-3 rounded-lg bg-surface-hover p-2 text-sm"
+              >
+                <span className="shrink-0 text-ink-muted">{id.source_type}</span>
                 <a
                   href={id.external_url || "#"}
-                  className="text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                  target="_blank"
+                  rel="noreferrer"
+                  className={cx(
+                    "min-w-0 flex items-center gap-1 truncate text-accent hover:underline",
+                    !id.external_url && "pointer-events-none text-ink-muted",
+                  )}
                   onClick={(e) => {
                     if (!id.external_url) e.preventDefault();
                   }}
                 >
-                  {id.external_id.slice(0, 30)}
-                  <ExternalLink className="w-3 h-3" />
+                  <span className="truncate font-mono text-xs">{id.external_id}</span>
+                  {id.external_url && <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />}
                 </a>
-                <span className="text-xs text-gray-600">
-                  conf: {(id.confidence * 100).toFixed(0)}%
+                <span className="shrink-0 font-mono text-xs text-ink-muted">
+                  {(id.confidence * 100).toFixed(0)}%
                 </span>
               </div>
             ))}
           </div>
-        </div>
+        </Section>
       )}
 
       {/* Assessments */}
       {assessments.length > 0 && (
-        <div className="panel p-4">
-          <h3 className="panel-header -mx-4 -mt-4 mb-3">
-            Assessments ({assessments.length})
-          </h3>
-          <div className="space-y-2">
-            {assessments.map((a, i) => (
-              <div key={i} className="flex items-center justify-between text-sm p-2 rounded bg-gray-800/30">
-                <div>
-                  <span className="text-gray-300 font-medium">{a.dimension}</span>
-                  {a.assessor_agent && (
-                    <span className="text-xs text-gray-600 ml-2">by {a.assessor_agent}</span>
-                  )}
+        <Section title={`评估 (${assessments.length})`}>
+          <div className="grid gap-2 lg:grid-cols-2">
+            {assessments.map((assessment, i) => (
+              <div key={`${assessment.assessment_id}-${i}`} className="rounded-lg bg-surface-hover p-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <span className="font-semibold text-ink">{assessment.dimension}</span>
+                    {assessment.assessor_agent && (
+                      <span className="ml-2 text-xs text-ink-muted">by {assessment.assessor_agent}</span>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="font-mono text-sm font-bold text-accent">{assessment.score.toFixed(1)}</span>
+                    <span className="font-mono text-xs text-ink-muted">
+                      {(assessment.confidence * 100).toFixed(0)}%
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-blue-400 font-mono font-bold">{a.score.toFixed(1)}</span>
-                  <span className="text-xs text-gray-600">
-                    conf: {(a.confidence * 100).toFixed(0)}%
-                  </span>
-                </div>
+                {assessment.rationale && (
+                  <p className="mt-2 text-xs leading-5 text-ink-secondary">{assessment.rationale}</p>
+                )}
               </div>
             ))}
           </div>
-        </div>
+        </Section>
       )}
 
       {/* Evidence */}
       {evidence.length > 0 && (
-        <div className="panel p-4">
-          <h3 className="panel-header -mx-4 -mt-4 mb-3">
-            Evidence ({evidence.length})
-          </h3>
+        <Section title={`证据 (${evidence.length})`}>
           <div className="space-y-2">
             {evidence.map((ev, i) => (
-              <div key={i} className="p-2 rounded bg-gray-800/30 text-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-300 font-medium">{ev.title}</span>
-                  <span className={`badge ${
-                    ev.tier <= 1 ? "badge-green" : ev.tier === 2 ? "badge-blue" : ev.tier === 3 ? "badge-yellow" : "badge-gray"
-                  }`}>
-                    T{ev.tier}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
-                  <span>{ev.evidence_type}</span>
-                  <span>·</span>
-                  <span>{ev.source_name}</span>
-                  <span>·</span>
-                  <span>conf: {(ev.confidence * 100).toFixed(0)}%</span>
+              <div key={`${ev.evidence_id}-${i}`} className="rounded-lg bg-surface-hover p-3 text-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    {ev.source_url ? (
+                      <a
+                        href={ev.source_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-semibold text-ink hover:text-accent"
+                      >
+                        {ev.title}
+                      </a>
+                    ) : (
+                      <span className="font-semibold text-ink">{ev.title}</span>
+                    )}
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+                      <span>{ev.evidence_type}</span>
+                      <span>·</span>
+                      <span>{ev.source_name}</span>
+                      <span>·</span>
+                      <span>conf {(ev.confidence * 100).toFixed(0)}%</span>
+                    </div>
+                  </div>
+                  <EvidenceTierBadge tier={ev.tier} />
                 </div>
               </div>
             ))}
           </div>
-        </div>
+        </Section>
       )}
 
       {/* Academic Works */}
       {works.length > 0 && (
-        <div className="panel p-4">
-          <h3 className="panel-header -mx-4 -mt-4 mb-3">
-            Publications ({works.length})
-          </h3>
-          <div className="space-y-2">
-            {works.slice(0, 5).map((w, i) => (
-              <div key={i} className="text-sm">
-                <span className="text-gray-300">{w.title}</span>
-                <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500">
-                  {w.venue && <span>{w.venue}</span>}
-                  {w.year && <span>{w.year}</span>}
-                  {w.citations !== undefined && <span>{w.citations} citations</span>}
+        <Section title={`论文 / 作品 (${works.length})`}>
+          <div className="space-y-3">
+            {works.slice(0, 8).map((work, i) => (
+              <div key={`${work.work_id}-${i}`} className="text-sm">
+                {work.url ? (
+                  <a
+                    href={work.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-ink hover:text-accent"
+                  >
+                    {work.title}
+                  </a>
+                ) : (
+                  <span className="font-medium text-ink">{work.title}</span>
+                )}
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+                  {work.venue && <span>{work.venue}</span>}
+                  {work.year && <span>{work.year}</span>}
+                  {work.citations !== undefined && <span>{work.citations} citations</span>}
                 </div>
               </div>
             ))}
           </div>
-        </div>
+        </Section>
       )}
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="panel overflow-hidden">
+      <h3 className="panel-header">{title}</h3>
+      <div className="p-4">{children}</div>
     </div>
   );
 }
@@ -295,10 +350,10 @@ function StatCard({
   value?: number;
 }) {
   return (
-    <div className="panel p-3 text-center">
-      <Icon className="w-4 h-4 text-gray-500 mx-auto mb-1" />
-      <div className="text-lg font-bold text-gray-200">{value ?? "—"}</div>
-      <div className="text-[10px] text-gray-600">{label}</div>
+    <div className="rounded-xl border border-rule bg-surface-hover p-3 text-center">
+      <Icon className="mx-auto mb-1 h-4 w-4 text-ink-muted" aria-hidden="true" />
+      <div className="font-mono text-lg font-bold text-ink">{value ?? "—"}</div>
+      <div className="text-[10px] text-ink-muted">{label}</div>
     </div>
   );
 }

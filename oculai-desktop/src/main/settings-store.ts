@@ -14,7 +14,7 @@ export interface AppSettings {
   llmModel: string;
   thinkingLevel: "off" | "low" | "medium" | "high";
 
-  // API keys (stored encrypted)
+  // API keys (stored encrypted or obfuscated at rest; never exposed to renderer)
   apiKeys: Record<string, string>;
 
   // Source toggles
@@ -29,6 +29,10 @@ export interface AppSettings {
   tokenBudget: number;
   concurrency: number;
 }
+
+export type SafeAppSettings = Omit<AppSettings, "apiKeys"> & {
+  apiKeyStatus: Record<string, boolean>;
+};
 
 const DEFAULT_SETTINGS: AppSettings = {
   llmProvider: "anthropic",
@@ -84,23 +88,52 @@ export class SettingsStore {
       const path = settingsPath();
       if (existsSync(path)) {
         const raw = readFileSync(path, "utf-8");
-        const parsed = JSON.parse(raw);
-        return { ...DEFAULT_SETTINGS, ...parsed };
+        const parsed = JSON.parse(raw) as Partial<AppSettings>;
+        return {
+          ...DEFAULT_SETTINGS,
+          ...parsed,
+          apiKeys: {
+            ...DEFAULT_SETTINGS.apiKeys,
+            ...(parsed.apiKeys ?? {}),
+          },
+          enabledSources: {
+            ...DEFAULT_SETTINGS.enabledSources,
+            ...(parsed.enabledSources ?? {}),
+          },
+        };
       }
     } catch {
       // Use defaults on any error
     }
-    return { ...DEFAULT_SETTINGS };
+    return {
+      ...DEFAULT_SETTINGS,
+      apiKeys: { ...DEFAULT_SETTINGS.apiKeys },
+      enabledSources: { ...DEFAULT_SETTINGS.enabledSources },
+    };
   }
 
   save(): void {
-    const toSave = { ...this.settings };
-    // Never persist API keys in plaintext
-    delete (toSave as Record<string, unknown>).apiKeys;
-    writeFileSync(settingsPath(), JSON.stringify(toSave, null, 2), "utf-8");
+    // API keys stored here are encrypted by Electron safeStorage when available.
+    // getAll() below still strips them before data reaches the renderer.
+    writeFileSync(settingsPath(), JSON.stringify(this.settings, null, 2), "utf-8");
   }
 
-  getAll(): AppSettings {
+  getAll(): SafeAppSettings {
+    // Never expose API key values (encrypted or plaintext fallback) to the renderer.
+    const { apiKeys, ...safe } = this.settings;
+    return {
+      ...safe,
+      enabledSources: { ...safe.enabledSources },
+      apiKeyStatus: Object.fromEntries(
+        Object.keys(DEFAULT_SETTINGS.apiKeys)
+          .concat(["anthropic", "openai", "deepseek", "zhipu", "github", "semantic_scholar", "baidu", "tavily", "exa"])
+          .map((provider) => [provider, Boolean(apiKeys[provider])]),
+      ),
+    };
+  }
+
+  /** Get all settings including apiKeys — only for internal main-process use. */
+  getAllInternal(): AppSettings {
     return { ...this.settings };
   }
 

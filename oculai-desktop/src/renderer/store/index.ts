@@ -54,6 +54,8 @@ interface OculaiState {
   candidates: Candidate[];
   selectedCandidate: CandidateDetail | null;
   setCandidates: (candidates: Candidate[]) => void;
+  upsertCandidateSummary: (candidate: Candidate) => void;
+  clearCandidates: () => void;
   setSelectedCandidate: (candidate: CandidateDetail | null) => void;
 
   // Agent messages (detailed log)
@@ -66,6 +68,7 @@ interface OculaiState {
   setActiveTab: (tab: OculaiState["activeTab"]) => void;
   settingsOpen: boolean;
   setSettingsOpen: (open: boolean) => void;
+  resetRunScopedState: () => void;
 
   // Report
   reportHtml: string | null;
@@ -85,7 +88,23 @@ export const useStore = create<OculaiState>((set) => ({
   // Runs
   runs: [],
   activeRunId: null,
-  setActiveRun: (runId) => set({ activeRunId: runId, activeTab: "pipeline" }),
+  setActiveRun: (runId) =>
+    set((s) => {
+      if (s.activeRunId === runId) {
+        return { activeRunId: runId, activeTab: "pipeline" };
+      }
+      return {
+        activeRunId: runId,
+        activeTab: "pipeline",
+        orchestratorPhase: "init",
+        subagents: [],
+        activityFeed: [],
+        candidates: [],
+        selectedCandidate: null,
+        messages: [],
+        reportHtml: null,
+      };
+    }),
   addRun: (run) => set((s) => ({ runs: [run, ...s.runs] })),
   setRuns: (runs) => set({ runs }),
   updateRun: (runId, updates) =>
@@ -133,6 +152,17 @@ export const useStore = create<OculaiState>((set) => ({
   candidates: [],
   selectedCandidate: null,
   setCandidates: (candidates) => set({ candidates }),
+  upsertCandidateSummary: (candidate) =>
+    set((s) => {
+      const idx = s.candidates.findIndex((c) => c.person_id === candidate.person_id);
+      if (idx >= 0) {
+        const candidates = [...s.candidates];
+        candidates[idx] = { ...candidates[idx], ...candidate };
+        return { candidates };
+      }
+      return { candidates: [candidate, ...s.candidates] };
+    }),
+  clearCandidates: () => set({ candidates: [], selectedCandidate: null }),
   setSelectedCandidate: (candidate) => set({ selectedCandidate: candidate }),
 
   // Messages
@@ -148,6 +178,17 @@ export const useStore = create<OculaiState>((set) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
   settingsOpen: false,
   setSettingsOpen: (open) => set({ settingsOpen: open }),
+  resetRunScopedState: () =>
+    set({
+      orchestratorPhase: "init",
+      subagents: [],
+      activityFeed: [],
+      candidates: [],
+      selectedCandidate: null,
+      messages: [],
+      activeTab: "pipeline",
+      reportHtml: null,
+    }),
 
   // Report
   reportHtml: null,

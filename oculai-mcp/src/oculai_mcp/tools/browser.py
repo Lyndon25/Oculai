@@ -9,6 +9,7 @@ ads, sidebars, and outputs clean Markdown optimized for LLM consumption.
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -56,7 +57,7 @@ async def capture_page_evidence(
         return {"status": "error", "error": {"code": "invalid_mode", "message": f"Mode '{mode}' not supported. Use 'text', 'fit_markdown', 'screenshot', or 'full'."}}
 
     evidence_id = uuid4()
-    content: dict[str, Any] = {"url": url, "mode": mode, "captured_at": str(evidence_id)}
+    content: dict[str, Any] = {"url": url, "mode": mode, "captured_at": datetime.now(timezone.utc).isoformat()}
     title = f"Page capture: {url[:100]}"
 
     text_content: str | None = None

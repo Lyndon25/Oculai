@@ -5,6 +5,7 @@ with must-pass gate enforcement and full audit history.
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -12,6 +13,21 @@ from oculai_mcp.db.client import execute_with_retry, fetch_with_retry, fetchrow_
 from oculai_mcp.tools.assessment_weights import ROLE_WEIGHTS, check_gates, get_gates, get_weights
 
 logger = logging.getLogger(__name__)
+
+# Evidence types relevant to each assessment dimension.
+# Used to filter evidence when validating tier requirements per-dimension.
+_DIMENSION_EVIDENCE_TYPES: dict[str, frozenset[str]] = {
+    "academic": frozenset({"paper", "conference_talk", "patent", "award", "reference"}),
+    "engineering": frozenset({"code", "patent", "paper", "certification", "blog_post"}),
+    "leadership": frozenset({"reference", "interview", "award", "email"}),
+    "communication": frozenset({"conference_talk", "blog_post", "social_media", "interview", "web_page"}),
+    "culture_fit": frozenset({"reference", "interview", "social_media", "email"}),
+    "skill_match": frozenset({"paper", "code", "certification", "patent", "profile", "web_page"}),
+    "location": frozenset({"profile", "web_page"}),
+    "career_stage": frozenset({"profile", "paper", "patent", "reference", "web_page"}),
+    "mobility": frozenset({"profile", "web_page", "social_media", "interview"}),
+    "overall": frozenset(),  # overall dimension accepts any evidence type
+}
 
 
 async def score_candidate(
@@ -37,13 +53,14 @@ async def score_candidate(
     validation_issues = []
 
     for dim, score in dimensions.items():
-        # Validate evidence requirements
+        # Validate evidence requirements — filter evidence relevant to this dimension
+        dim_evidence_ids = await _filter_evidence_for_dimension(parsed_evidence_ids, dim)
         validation = await validate_evidence_for_score(
             run_id=run_id,
             person_id=person_id,
             dimension=dim,
             score=score,
-            evidence_ids=parsed_evidence_ids,
+            evidence_ids=dim_evidence_ids,
         )
         if not validation["valid"]:
             validation_issues.append(validation)
@@ -283,9 +300,11 @@ async def _compute_overall_score(person_id: UUID, run_id: UUID, role_type: str =
         dim = r["dimension"]
         score = r["score"]
         conf = r["confidence"] if r["confidence"] is not None else 0.5
-        w = weights.get(dim, 0.1)
-        if dim not in weights:
-            logger.warning("Dimension '%s' has no weight in role_type '%s' — using 0.1", dim, role_type)
+        w = weights.get(dim)
+        if w is None:
+            # Unknown dimension — skip from weighted average to avoid inflating the total
+            logger.warning("Dimension '%s' has no weight in role_type '%s' — skipping", dim, role_type)
+            continue
 
         weighted_sum += score * w * conf
         confidence_sum += w * conf
@@ -315,7 +334,7 @@ async def _compute_overall_score(person_id: UUID, run_id: UUID, role_type: str =
         "gate_status": gate_status,
         "gate_failures": gate_failures,
         "confidence_adjusted": True,
-        "computed_at": str(__import__("datetime").datetime.now(__import__("datetime").timezone.utc)),
+        "computed_at": datetime.now(timezone.utc).isoformat(),
     }
 
     await execute_with_retry(
@@ -333,6 +352,35 @@ async def _compute_overall_score(person_id: UUID, run_id: UUID, role_type: str =
         "gate_status": gate_status,
         "gate_failures": gate_failures,
     }
+
+
+async def _filter_evidence_for_dimension(
+    evidence_ids: list[UUID],
+    dimension: str,
+) -> list[UUID]:
+    """Filter evidence IDs to only those relevant to the given assessment dimension.
+
+    Evidence types that don't match the dimension are excluded from tier validation.
+    The 'overall' dimension accepts all evidence types.
+    """
+    if not evidence_ids:
+        return []
+
+    relevant_types = _DIMENSION_EVIDENCE_TYPES.get(dimension)
+    if relevant_types is None or len(relevant_types) == 0:
+        # Unknown dimension or 'overall' — accept all evidence
+        return evidence_ids
+
+    # Query evidence types for the given IDs
+    rows = await fetch_with_retry(
+        "SELECT evidence_id, evidence_type FROM evidence WHERE evidence_id = ANY($1)",
+        evidence_ids,
+    )
+    type_map = {r["evidence_id"]: r["evidence_type"] for r in rows}
+
+    filtered = [eid for eid in evidence_ids
+                if type_map.get(eid) in relevant_types]
+    return filtered
 
 
 async def validate_evidence_for_score(

@@ -9,8 +9,9 @@
  * 5. Register IPC handlers
  * 6. Ready for user interaction
  */
-import { app, BrowserWindow, shell } from "electron";
-import { join } from "path";
+import { app, BrowserWindow, shell, screen } from "electron";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { existsSync, mkdirSync } from "fs";
 import { PostgresManager } from "./postgres-manager.js";
 import { ToolBridge } from "./tool-bridge.js";
@@ -30,18 +31,27 @@ const postgresManager = new PostgresManager();
 const toolBridge = new ToolBridge();
 
 const isDev = !app.isPackaged;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Backend lifecycle state — prevents races between start and shutdown
+let backendState: "stopped" | "starting" | "running" | "stopping" = "stopped";
 
 function createWindow(): void {
+  const { workAreaSize } = screen.getPrimaryDisplay();
+  const initialWidth = Math.max(1024, Math.min(1400, workAreaSize.width - 48));
+  const initialHeight = Math.max(680, Math.min(900, workAreaSize.height - 48));
+
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    width: initialWidth,
+    height: initialHeight,
     minWidth: 1024,
-    minHeight: 700,
+    minHeight: 680,
     title: "Oculai Desktop",
     titleBarStyle: "hiddenInset",
     frame: process.platform === "darwin" ? false : true,
     webPreferences: {
-      preload: join(__dirname, "..", "preload", "index.js"),
+      preload: join(__dirname, "..", "preload", "index.cjs"),
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
@@ -50,6 +60,29 @@ function createWindow(): void {
   });
 
   stateBus.setWindow(mainWindow);
+
+  mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    const levelName = ["verbose", "info", "warning", "error"][level] ?? String(level);
+    console.log(`[renderer:${levelName}] ${message} (${sourceId}:${line})`);
+  });
+
+  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    console.error(`[renderer:load-failed] ${errorCode} ${errorDescription} ${validatedURL}`);
+  });
+
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    console.error(`[renderer:gone] ${details.reason} exitCode=${details.exitCode}`);
+  });
+
+  mainWindow.webContents.on("did-finish-load", () => {
+    mainWindow?.webContents.executeJavaScript(
+      "({ title: document.title, rootChildren: document.getElementById('root')?.childElementCount ?? -1, bodyText: document.body.innerText.slice(0, 300) })",
+    ).then((snapshot: unknown) => {
+      console.log(`[renderer:loaded] ${JSON.stringify(snapshot)}`);
+    }).catch((err: unknown) => {
+      console.error(`[renderer:snapshot-failed] ${err instanceof Error ? err.message : String(err)}`);
+    });
+  });
 
   // Load the renderer
   if (isDev) {
@@ -77,6 +110,12 @@ function createWindow(): void {
 }
 
 async function startBackend(): Promise<void> {
+  if (backendState !== "stopped") {
+    stateBus.emitSystemLog("warn", `startBackend called while state=${backendState}, ignoring`);
+    return;
+  }
+  backendState = "starting";
+
   // 1. Start PostgreSQL
   try {
     stateBus.emitSystemStatus({ db: "connecting", python: "stopped", llm: "unconfigured" });
@@ -144,13 +183,18 @@ async function startBackend(): Promise<void> {
     stateBus.emitSystemStatus({ db: "connected", python: "ready", llm: "unconfigured" });
   }
 
-  // 4. Register IPC handlers
-  registerIpcHandlers(toolBridge);
+  // 4. IPC handlers are registered during app startup before slow backend work.
 
+  backendState = "running";
   stateBus.emitSystemLog("info", "Oculai Desktop backend ready");
 }
 
 async function shutdownBackend(): Promise<void> {
+  if (backendState !== "running") {
+    stateBus.emitSystemLog("warn", `shutdownBackend called while state=${backendState}, ignoring`);
+    return;
+  }
+  backendState = "stopping";
   stateBus.emitSystemLog("info", "Shutting down...");
 
   disposeSession();
@@ -167,6 +211,7 @@ async function shutdownBackend(): Promise<void> {
     // Ignore
   }
 
+  backendState = "stopped";
   stateBus.emitSystemLog("info", "Shutdown complete");
 }
 
@@ -180,6 +225,7 @@ app.whenReady().then(async () => {
   }
 
   createWindow();
+  registerIpcHandlers(toolBridge, postgresManager);
   await startBackend();
 
   app.on("activate", () => {

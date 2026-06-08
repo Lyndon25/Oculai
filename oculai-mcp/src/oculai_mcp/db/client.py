@@ -65,7 +65,8 @@ async def execute_with_retry(query: str, *args: Any, max_retries: int = 3, base_
         try:
             async with pool.acquire() as conn:
                 return await conn.execute(query, *args)
-        except (asyncpg.PostgresConnectionError, asyncpg.TooManyConnectionsError) as e:
+        except (asyncpg.PostgresConnectionError, asyncpg.TooManyConnectionsError,
+                asyncpg.SerializationError, asyncpg.DeadlockDetectedError) as e:
             last_error = e
             delay = base_delay * (2 ** attempt)
             logger.warning("DB connection error (attempt %d/%d), retrying in %.1fs", attempt + 1, max_retries, delay)
@@ -80,7 +81,8 @@ async def fetch_with_retry(query: str, *args: Any, max_retries: int = 3, base_de
         try:
             async with pool.acquire() as conn:
                 return await conn.fetch(query, *args)
-        except (asyncpg.PostgresConnectionError, asyncpg.TooManyConnectionsError) as e:
+        except (asyncpg.PostgresConnectionError, asyncpg.TooManyConnectionsError,
+                asyncpg.SerializationError, asyncpg.DeadlockDetectedError) as e:
             last_error = e
             delay = base_delay * (2 ** attempt)
             logger.warning("DB connection error (attempt %d/%d), retrying in %.1fs", attempt + 1, max_retries, delay)
@@ -95,7 +97,8 @@ async def fetchval_with_retry(query: str, *args: Any, max_retries: int = 3, base
         try:
             async with pool.acquire() as conn:
                 return await conn.fetchval(query, *args)
-        except (asyncpg.PostgresConnectionError, asyncpg.TooManyConnectionsError) as e:
+        except (asyncpg.PostgresConnectionError, asyncpg.TooManyConnectionsError,
+                asyncpg.SerializationError, asyncpg.DeadlockDetectedError) as e:
             last_error = e
             delay = base_delay * (2 ** attempt)
             logger.warning("DB connection error (attempt %d/%d), retrying in %.1fs", attempt + 1, max_retries, delay)
@@ -110,7 +113,8 @@ async def fetchrow_with_retry(query: str, *args: Any, max_retries: int = 3, base
         try:
             async with pool.acquire() as conn:
                 return await conn.fetchrow(query, *args)
-        except (asyncpg.PostgresConnectionError, asyncpg.TooManyConnectionsError) as e:
+        except (asyncpg.PostgresConnectionError, asyncpg.TooManyConnectionsError,
+                asyncpg.SerializationError, asyncpg.DeadlockDetectedError) as e:
             last_error = e
             delay = base_delay * (2 ** attempt)
             logger.warning("DB connection error (attempt %d/%d), retrying in %.1fs", attempt + 1, max_retries, delay)

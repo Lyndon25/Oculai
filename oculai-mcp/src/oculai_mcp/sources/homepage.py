@@ -240,7 +240,15 @@ class PersonalHomepageSource(IDataSource):
         name = meta_name or schema_name
         if not name and page_title:
             # Clean title: split on common separators and take first part
-            name = page_title.split("|")[0].split("-")[0].split("")[0].strip()
+            # Use space as delimiter for multi-part titles; strip common suffixes
+            raw = page_title.split("|")[0].split("-")[0].strip()
+            # Remove common title suffixes
+            for suffix in ["Homepage", "homepage", "Home", "Profile", "profile",
+                           "Personal Website", "personal website", "About", "about"]:
+                if raw.endswith(f" {suffix}"):
+                    raw = raw[:-(len(suffix) + 1)].strip()
+                    break
+            name = raw
             # If title looks like "John Doe - Homepage", use "John Doe"
             if len(name.split()) > 4:
                 name = " ".join(name.split()[:3])

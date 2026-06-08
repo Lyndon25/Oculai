@@ -10,16 +10,22 @@ import type {
   SubagentCompletedEvent,
   CandidateUpsertedEvent,
   OrchestratorPhaseEvent,
+  RunErrorEvent,
+  SystemLogEvent,
 } from "../shared/events.js";
+import type { Candidate, SourcingRun } from "../shared/types.js";
 
 export default function App() {
   const settingsOpen = useStore((s) => s.settingsOpen);
+  const activeRunId = useStore((s) => s.activeRunId);
   const setSystemStatus = useStore((s) => s.setSystemStatus);
   const addMessage = useStore((s) => s.addMessage);
   const addSubagent = useStore((s) => s.addSubagent);
   const updateSubagent = useStore((s) => s.updateSubagent);
   const addActivity = useStore((s) => s.addActivity);
   const setOrchestratorPhase = useStore((s) => s.setOrchestratorPhase);
+  const upsertCandidateSummary = useStore((s) => s.upsertCandidateSummary);
+  const resetRunScopedState = useStore((s) => s.resetRunScopedState);
 
   // On mount: hydrate runs from persisted recent-runs.json
   useEffect(() => {
@@ -51,6 +57,42 @@ export default function App() {
     });
   }, []);
 
+  // Keep active run metadata fresh when switching/resuming runs.
+  useEffect(() => {
+    if (!activeRunId) return;
+    let cancelled = false;
+    window.oculai.getRunState({ runId: activeRunId }).then((result: unknown) => {
+      if (cancelled) return;
+      const data = result as {
+        run?: Partial<SourcingRun>;
+        candidate_count?: number;
+        task_count?: number;
+        completed_task_count?: number;
+      };
+      if (data.run?.run_id) {
+        useStore.getState().updateRun(data.run.run_id, {
+          status: data.run.status as never,
+          title: data.run.title,
+          updated_at: data.run.updated_at,
+          candidate_count: data.candidate_count ?? data.run.candidate_count,
+          task_count: data.task_count ?? data.run.task_count,
+          completed_task_count: data.completed_task_count ?? data.run.completed_task_count,
+          active_plan_id: data.run.active_plan_id,
+        });
+      }
+    }).catch((err: unknown) => {
+      addMessage({
+        role: "system",
+        content: `Failed to refresh run state: ${err instanceof Error ? err.message : String(err)}`,
+        timestamp: new Date().toISOString(),
+        isError: true,
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRunId]);
+
   // Subscribe to IPC events from main process
   useEffect(() => {
     const unsubs: (() => void)[] = [];
@@ -60,6 +102,47 @@ export default function App() {
       window.oculai.on("system:status", (payload: unknown) => {
         const data = payload as { status: Record<string, unknown> };
         setSystemStatus(data.status);
+      }),
+    );
+
+    // System logs
+    unsubs.push(
+      window.oculai.on("system:log", (payload: unknown) => {
+        const data = payload as SystemLogEvent;
+        addMessage({
+          role: "system",
+          content: data.message,
+          timestamp: data.timestamp,
+          isError: data.level === "error" || data.level === "warn",
+        });
+        if (data.level === "error" || data.level === "warn") {
+          addActivity({
+            timestamp: data.timestamp,
+            action: data.level === "error" ? "error" : "audit",
+            message: data.message,
+            detail: "system",
+          });
+        }
+      }),
+    );
+
+    // Run errors
+    unsubs.push(
+      window.oculai.on("run:error", (payload: unknown) => {
+        const data = payload as RunErrorEvent;
+        addMessage({
+          role: "system",
+          content: `Run ${data.runId} failed during ${data.phase}: ${data.error}`,
+          timestamp: new Date().toISOString(),
+          isError: true,
+        });
+        addActivity({
+          timestamp: new Date().toISOString(),
+          action: "error",
+          message: data.error,
+          detail: data.phase,
+        });
+        useStore.getState().updateRun(data.runId, { status: "aborted" as never });
       }),
     );
 
@@ -125,16 +208,16 @@ export default function App() {
     unsubs.push(
       window.oculai.on("run:created", (payload: unknown) => {
         const data = payload as { runId: string; title: string; status: string };
+        resetRunScopedState();
         useStore.getState().addRun({
           run_id: data.runId,
           title: data.title,
           status: data.status as never,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
+          candidate_count: 0,
         });
         useStore.getState().setActiveRun(data.runId);
-        useStore.getState().clearSubagents();
-        useStore.getState().clearActivity();
       }),
     );
 
@@ -201,10 +284,26 @@ export default function App() {
     unsubs.push(
       window.oculai.on("candidate:upserted", (payload: unknown) => {
         const data = payload as CandidateUpsertedEvent;
+        const candidate: Candidate = {
+          person_id: data.personId,
+          canonical_name: data.name,
+          latest_institution: data.institution || undefined,
+          status: "pending",
+          created_at: new Date().toISOString(),
+        };
+        upsertCandidateSummary(candidate);
+        const activeRunId = useStore.getState().activeRunId;
+        if (activeRunId) {
+          const current = useStore.getState().runs.find((r) => r.run_id === activeRunId);
+          const nextCount = useStore.getState().candidates.length;
+          useStore.getState().updateRun(activeRunId, {
+            candidate_count: Math.max(current?.candidate_count ?? 0, nextCount),
+          });
+        }
         addActivity({
           timestamp: new Date().toISOString(),
           action: "upsert",
-          message: `New candidate: ${data.name}${data.institution ? ` (${data.institution})` : ""}`,
+          message: `新增候选人：${data.name}${data.institution ? `（${data.institution}）` : ""}`,
           detail: data.sourceName ? `via ${data.sourceName}` : undefined,
         });
       }),
@@ -230,7 +329,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="h-full flex flex-col bg-gray-950">
+    <div className="h-full flex flex-col bg-canvas text-ink">
       <TitleBar />
       <div className="flex-1 flex overflow-hidden">
         <Sidebar />

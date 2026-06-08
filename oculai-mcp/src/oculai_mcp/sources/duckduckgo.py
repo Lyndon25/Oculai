@@ -14,7 +14,7 @@ import time
 from typing import Any
 
 from oculai_mcp.db.provenance import log_source_call
-from oculai_mcp.db.quotas import check_quota, consume_quota
+from oculai_mcp.db.quotas import check_quota, try_consume_quota
 from oculai_mcp.sources.base import HealthStatus, IDataSource, RawCandidate, SearchQuery
 
 logger = logging.getLogger(__name__)
@@ -181,7 +181,7 @@ class DuckDuckGoSource(IDataSource):
                     )
                 )
 
-            await consume_quota(self.name, amount=len(candidates))
+            await try_consume_quota(self.name, amount=len(candidates))
             duration_ms = int((time.perf_counter() - start) * 1000)
             await log_source_call(
                 source_name=self.name,

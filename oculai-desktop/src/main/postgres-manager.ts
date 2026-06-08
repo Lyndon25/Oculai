@@ -150,10 +150,11 @@ export class PostgresManager {
     });
   }
 
-  /** Stop PostgreSQL gracefully. */
+  /** Stop PostgreSQL gracefully. Always spawns pg_ctl stop regardless of internal state. */
   async stop(): Promise<void> {
-    if (!this.process) return;
-
+    // this.process references the pg_ctl start process, which exits immediately
+    // after daemonizing PG. We intentionally do NOT guard on `!this.process` here
+    // because we always want to issue pg_ctl stop against the running daemon.
     stateBus.emitSystemLog("info", "Stopping PostgreSQL...");
 
     return new Promise((resolve) => {

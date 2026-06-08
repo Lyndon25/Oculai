@@ -908,6 +908,311 @@
           "url"
         ]
       }
+    },
+    "oculai_claim_tasks": {
+      "description": "Claim pending tasks for a subagent to execute.",
+      "group": "Generated Drift Fix",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "run_id"
+          },
+          "task_types": {
+            "type": "string",
+            "description": "task_types"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "agent_id"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "limit"
+          }
+        },
+        "required": [
+          "run_id",
+          "task_types",
+          "agent_id"
+        ]
+      }
+    },
+    "oculai_complete_task": {
+      "description": "Mark a task as completed with output data.",
+      "group": "Generated Drift Fix",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "task_id"
+          },
+          "output_data": {
+            "type": "string",
+            "description": "output_data"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "agent_id"
+          }
+        },
+        "required": [
+          "task_id",
+          "output_data",
+          "agent_id"
+        ]
+      }
+    },
+    "oculai_fail_task": {
+      "description": "Mark a task as failed.",
+      "group": "Generated Drift Fix",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "task_id"
+          },
+          "error_message": {
+            "type": "string",
+            "description": "error_message"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "agent_id"
+          }
+        },
+        "required": [
+          "task_id",
+          "error_message"
+        ]
+      }
+    },
+    "oculai_record_iteration": {
+      "description": "Persist one step of an agent's reasoning loop to the database.",
+      "group": "Generated Drift Fix",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "task_id"
+          },
+          "iteration_number": {
+            "type": "integer",
+            "description": "iteration_number"
+          },
+          "iteration_type": {
+            "type": "string",
+            "description": "iteration_type"
+          },
+          "reasoning_text": {
+            "type": "string",
+            "description": "reasoning_text"
+          },
+          "action_taken": {
+            "type": "string",
+            "description": "action_taken"
+          },
+          "action_params": {
+            "type": "string",
+            "description": "action_params"
+          },
+          "observation_text": {
+            "type": "string",
+            "description": "observation_text"
+          },
+          "observation_data": {
+            "type": "string",
+            "description": "observation_data"
+          },
+          "decision": {
+            "type": "string",
+            "description": "decision"
+          },
+          "decision_rationale": {
+            "type": "string",
+            "description": "decision_rationale"
+          }
+        },
+        "required": [
+          "task_id",
+          "iteration_number",
+          "iteration_type"
+        ]
+      }
+    },
+    "oculai_get_task_iterations": {
+      "description": "Get all recorded iterations for a task, ordered by step number.",
+      "group": "Generated Drift Fix",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "task_id"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      }
+    },
+    "oculai_broadcast_discovery": {
+      "description": "Broadcast a discovery to all parallel agents in this run.",
+      "group": "Generated Drift Fix",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "run_id"
+          },
+          "discovery_type": {
+            "type": "string",
+            "description": "discovery_type"
+          },
+          "content": {
+            "type": "string",
+            "description": "content"
+          },
+          "discovered_by_agent": {
+            "type": "string",
+            "description": "discovered_by_agent"
+          }
+        },
+        "required": [
+          "run_id",
+          "discovery_type",
+          "content",
+          "discovered_by_agent"
+        ]
+      }
+    },
+    "oculai_get_broadcasts": {
+      "description": "Get all unconsumed broadcasts from other agents in this run.",
+      "group": "Generated Drift Fix",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "run_id"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "agent_id"
+          }
+        },
+        "required": [
+          "run_id",
+          "agent_id"
+        ]
+      }
+    },
+    "oculai_create_review_session": {
+      "description": "Create a multi-pass review session for a run's candidate pool.",
+      "group": "Generated Drift Fix",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "run_id"
+          },
+          "role_type": {
+            "type": "string",
+            "description": "role_type"
+          },
+          "candidate_ids": {
+            "type": "string",
+            "description": "candidate_ids"
+          }
+        },
+        "required": [
+          "run_id"
+        ]
+      }
+    },
+    "oculai_execute_review_pass": {
+      "description": "Advance a review session to the next pass.",
+      "group": "Generated Drift Fix",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "session_id"
+          },
+          "pass_type": {
+            "type": "string",
+            "description": "pass_type"
+          },
+          "completed_candidate_ids": {
+            "type": "string",
+            "description": "completed_candidate_ids"
+          }
+        },
+        "required": [
+          "session_id",
+          "pass_type"
+        ]
+      }
+    },
+    "oculai_get_review_progress": {
+      "description": "Get current review session progress.",
+      "group": "Generated Drift Fix",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "session_id"
+          }
+        },
+        "required": [
+          "session_id"
+        ]
+      }
+    },
+    "oculai_apply_audit_adjustments": {
+      "description": "Apply auditor-recommended score adjustments with history tracking.",
+      "group": "Generated Drift Fix",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "session_id"
+          },
+          "adjustments": {
+            "type": "string",
+            "description": "adjustments"
+          }
+        },
+        "required": [
+          "session_id",
+          "adjustments"
+        ]
+      }
+    },
+    "oculai_finalize_review_session": {
+      "description": "Mark a review session as complete and compute final rankings.",
+      "group": "Generated Drift Fix",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "session_id"
+          }
+        },
+        "required": [
+          "session_id"
+        ]
+      }
     }
   }
 }

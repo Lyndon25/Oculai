@@ -1,8 +1,3 @@
-/**
- * Preload script — exposes a typed IPC API to the renderer via contextBridge.
- */
-import { contextBridge, ipcRenderer } from "electron";
-import { IPC_CHANNELS } from "../shared/ipc-channels.js";
 import type {
   ExportReportPayload,
   GetCandidateDetailPayload,
@@ -10,6 +5,53 @@ import type {
   GetRunStatePayload,
   StartRunPayload,
 } from "../shared/events.js";
+
+const { contextBridge, ipcRenderer } = require("electron") as typeof import("electron");
+
+const IPC_CHANNELS = {
+  RUN_CREATED: "run:created",
+  RUN_ERROR: "run:error",
+  ORCHESTRATOR_PHASE: "orchestrator:phase",
+  SUBAGENT_SPAWNED: "subagent:spawned",
+  SUBAGENT_PROGRESS: "subagent:progress",
+  SUBAGENT_COMPLETED: "subagent:completed",
+  CANDIDATE_UPSERTED: "candidate:upserted",
+  AGENT_THINKING: "agent:thinking",
+  AGENT_MESSAGE: "agent:message",
+  AGENT_TOOL_CALL: "agent:tool_call",
+  AGENT_TOOL_RESULT: "agent:tool_result",
+  REPORT_READY: "report:ready",
+  SYSTEM_STATUS: "system:status",
+  SYSTEM_LOG: "system:log",
+  START_RUN: "action:startRun",
+  RESUME_RUN: "action:resumeRun",
+  ABORT_RUN: "action:abortRun",
+  GET_RUN_STATE: "action:getRunState",
+  GET_CANDIDATES: "action:getCandidates",
+  GET_CANDIDATE_DETAIL: "action:getCandidateDetail",
+  EXPORT_REPORT: "action:exportReport",
+  LIST_RUNS: "action:listRuns",
+  SETTINGS_GET: "settings:get",
+  SETTINGS_SET: "settings:set",
+  SETTINGS_SET_API_KEY: "settings:setApiKey",
+} as const;
+
+const allowedEventChannels = [
+  IPC_CHANNELS.RUN_CREATED,
+  IPC_CHANNELS.RUN_ERROR,
+  IPC_CHANNELS.ORCHESTRATOR_PHASE,
+  IPC_CHANNELS.SUBAGENT_SPAWNED,
+  IPC_CHANNELS.SUBAGENT_PROGRESS,
+  IPC_CHANNELS.SUBAGENT_COMPLETED,
+  IPC_CHANNELS.CANDIDATE_UPSERTED,
+  IPC_CHANNELS.AGENT_THINKING,
+  IPC_CHANNELS.AGENT_MESSAGE,
+  IPC_CHANNELS.AGENT_TOOL_CALL,
+  IPC_CHANNELS.AGENT_TOOL_RESULT,
+  IPC_CHANNELS.REPORT_READY,
+  IPC_CHANNELS.SYSTEM_STATUS,
+  IPC_CHANNELS.SYSTEM_LOG,
+] as string[];
 
 const api = {
   // ---- Actions (renderer → main) ----
@@ -47,26 +89,8 @@ const api = {
     ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET_API_KEY, { provider, key }),
 
   // ---- Events (main → renderer) ----
-  // Allowlist: only these event channels may be subscribed to from the renderer.
-  // All action/invoke channels are excluded — the renderer uses invoke() for those.
   on: (channel: string, callback: (...args: unknown[]) => void) => {
-    const allowedEventChannels = [
-      IPC_CHANNELS.RUN_CREATED,
-      IPC_CHANNELS.RUN_ERROR,
-      IPC_CHANNELS.ORCHESTRATOR_PHASE,
-      IPC_CHANNELS.SUBAGENT_SPAWNED,
-      IPC_CHANNELS.SUBAGENT_PROGRESS,
-      IPC_CHANNELS.SUBAGENT_COMPLETED,
-      IPC_CHANNELS.CANDIDATE_UPSERTED,
-      IPC_CHANNELS.AGENT_THINKING,
-      IPC_CHANNELS.AGENT_MESSAGE,
-      IPC_CHANNELS.AGENT_TOOL_CALL,
-      IPC_CHANNELS.AGENT_TOOL_RESULT,
-      IPC_CHANNELS.REPORT_READY,
-      IPC_CHANNELS.SYSTEM_STATUS,
-      IPC_CHANNELS.SYSTEM_LOG,
-    ];
-    if (allowedEventChannels.includes(channel as never)) {
+    if (allowedEventChannels.includes(channel)) {
       const subscription = (_event: Electron.IpcRendererEvent, ...args: unknown[]) =>
         callback(...args);
       ipcRenderer.on(channel, subscription);
@@ -78,15 +102,18 @@ const api = {
   },
 
   removeAllListeners: (channel: string) => {
-    ipcRenderer.removeAllListeners(channel);
+    if (allowedEventChannels.includes(channel)) {
+      ipcRenderer.removeAllListeners(channel);
+    }
   },
 };
 
 contextBridge.exposeInMainWorld("oculai", api);
 
-// Type declaration for renderer
 declare global {
   interface Window {
     oculai: typeof api;
   }
 }
+
+export {};

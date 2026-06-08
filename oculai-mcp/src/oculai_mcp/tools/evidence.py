@@ -52,8 +52,8 @@ async def attach_evidence(
             f"invalid evidence_type {evidence_type!r}; "
             f"must be one of {sorted(_VALID_EVIDENCE_TYPES)}"
         )
-    if confidence < 0.0:
-        raise ValidationError("confidence must be non-negative")
+    if confidence < 0.0 or confidence > 1.0:
+        raise ValidationError("confidence must be between 0.0 and 1.0")
 
     try:
         evidence_id = uuid4()

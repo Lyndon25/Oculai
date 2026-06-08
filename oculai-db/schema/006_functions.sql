@@ -111,10 +111,13 @@ BEGIN
     LOOP
         -- Template: $step_key.output_key → resolved value
         -- input_mapping defines {"param_name": "$step_key.field"}
+        -- The field part may contain dots for nested paths (e.g. "source_queries.arxiv").
         IF v_dep.input_mapping IS NOT NULL AND v_dep.input_mapping::text <> '{}' THEN
             v_input := v_input || jsonb_object_agg(
                 m.key,
-                jsonb_extract_path(v_dep.output_data, replace(m.value::text, '$' || v_dep.step_key || '.', ''))
+                v_dep.output_data #> string_to_array(
+                    replace(m.value::text, '$' || v_dep.step_key || '.', ''), '.'
+                )
             )
             FROM jsonb_each_text(v_dep.input_mapping) m;
         END IF;
@@ -326,6 +329,55 @@ BEGIN
     SET used_today = used_today + p_amount,
         updated_at = now()
     WHERE source_name = p_source_name;
+END;
+$$;
+
+-- Atomic check-and-consume: prevents the TOCTOU race between check_datasource_quota
+-- and consume_datasource_quota by locking the quota row and doing both in one tx.
+CREATE OR REPLACE FUNCTION try_consume_datasource_quota(
+    p_source_name TEXT,
+    p_amount      INTEGER DEFAULT 1
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_row  RECORD;
+BEGIN
+    -- Lock the quota row to prevent concurrent consumption
+    SELECT daily_limit, used_today, last_reset_at
+    INTO v_row
+    FROM DataSourceQuota
+    WHERE source_name = p_source_name
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        -- No quota configured — allow
+        RETURN true;
+    END IF;
+
+    -- Reset daily counter if the date has rolled over
+    IF v_row.last_reset_at < CURRENT_DATE THEN
+        UPDATE DataSourceQuota
+        SET used_today = p_amount,
+            last_reset_at = CURRENT_DATE,
+            updated_at = now()
+        WHERE source_name = p_source_name;
+        RETURN true;
+    END IF;
+
+    -- Check if there's remaining quota
+    IF v_row.used_today + p_amount > v_row.daily_limit THEN
+        RETURN false;
+    END IF;
+
+    -- Consume quota
+    UPDATE DataSourceQuota
+    SET used_today = used_today + p_amount,
+        updated_at = now()
+    WHERE source_name = p_source_name;
+
+    RETURN true;
 END;
 $$;
 

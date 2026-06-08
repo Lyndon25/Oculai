@@ -1,8 +1,84 @@
 import { useStore } from "../../store/index.js";
-import { Sparkles, Search, Users, FileText, ArrowRight, RotateCcw, Calendar, Clock } from "lucide-react";
+import {
+  Sparkles,
+  ArrowRight,
+  RotateCcw,
+  Calendar,
+  Users,
+  CheckCircle2,
+  ClipboardList,
+  Zap,
+  Globe,
+  FileText,
+} from "lucide-react";
 import { useState } from "react";
+import type React from "react";
 import type { StartRunPayload } from "../../../shared/events.js";
 import type { RunStatus } from "../../../shared/types.js";
+import { EmptyState, HealthDot, LoadingInline, RunStatusBadge, cx } from "../ui/primitives.js";
+
+const ROLE_TEMPLATES = [
+  {
+    title: "NLP / LLM 研究科学家",
+    skills: "NLP, LLM, PyTorch, Transformer, 中文语料",
+    jd: `公司背景：一家中国 AI 产品公司，正在建设面向企业知识工作的中文大模型应用。
+
+岗位职责：
+- 负责中文 NLP / LLM 训练、微调、评测与应用落地
+- 设计检索增强生成、领域适配、自动评测和数据治理方案
+- 与产品、工程团队协作，将研究成果转化为稳定服务
+
+硬性要求：
+- 3 年以上 NLP/LLM 研究或工程经验
+- 熟悉 Transformer、PyTorch、分布式训练/推理优化
+- 有中文语义理解、信息抽取、RAG 或 Agent 项目经验
+- 候选人需在中国大陆工作或有明确回国/远程协作可行性
+
+加分项：ACL/EMNLP/NeurIPS/ICLR 论文，开源模型或中文技术社区影响力。
+
+地点偏好：北京、上海、深圳、杭州，或中国时区远程。`,
+  },
+  {
+    title: "资深平台 / SRE 工程师",
+    skills: "Kubernetes, Linux, Observability, Go, Python",
+    jd: `公司背景：中国 B2B SaaS 公司，服务大规模企业客户，正在升级多云基础设施。
+
+岗位职责：
+- 设计高可用平台、自动化发布、监控告警与容量治理体系
+- 建设 Kubernetes / Linux / 网络相关基础设施
+- 推动故障复盘、SLO、成本优化和平台工程最佳实践
+
+硬性要求：
+- 5 年以上后端、基础设施或 SRE 经验
+- 熟悉 Kubernetes、Linux、可观测性、CI/CD 和事故响应
+- 能用 Go/Python 编写自动化工具
+- 候选人需在中国大陆或有中国团队协作经验
+
+加分项：大型互联网/云厂商经验，开源贡献，技术博客。
+
+地点偏好：上海、杭州、北京、深圳。`,
+  },
+  {
+    title: "机器人感知算法工程师",
+    skills: "Computer Vision, SLAM, ROS, Sensor Fusion, C++, Python",
+    jd: `公司背景：中国智能制造/机器人公司，正在招聘负责多传感器感知与定位的算法工程师。
+
+岗位职责：
+- 研发视觉、激光雷达、IMU 等多传感器融合算法
+- 负责 SLAM、目标检测、场景理解与部署优化
+- 与硬件、嵌入式、产品团队协作完成量产验证
+
+硬性要求：
+- 3 年以上机器人、自动驾驶或工业视觉经验
+- 熟悉 C++/Python、ROS、SLAM、深度学习或传统视觉算法
+- 有真实机器人/车辆/工业设备部署经验
+- 候选人优先中国大陆工作地点
+
+加分项：顶会论文、竞赛经历、开源项目、量产经验。
+
+地点偏好：深圳、上海、苏州、北京。`,
+  },
+];
 
 export function DashboardView() {
   const systemStatus = useStore((s) => s.systemStatus);
@@ -15,19 +91,22 @@ export function DashboardView() {
   const [error, setError] = useState<string | null>(null);
   const [resumingRunId, setResumingRunId] = useState<string | null>(null);
 
-  const canStart =
-    jobTitle.trim() &&
-    jdText.trim() &&
+  const isReady =
     systemStatus.db === "connected" &&
     systemStatus.python === "ready" &&
-    systemStatus.llm === "configured" &&
-    !isStarting;
+    systemStatus.llm === "configured";
+
+  const canStart = Boolean(jobTitle.trim() && jdText.trim() && isReady && !isStarting);
+  const skillCount = skills
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean).length;
+  const hasLocation = /中国|北京|上海|深圳|杭州|广州|苏州|成都|远程|China/i.test(jdText);
 
   const handleStart = async () => {
     if (!canStart) return;
     setIsStarting(true);
     setError(null);
-
     try {
       const payload: StartRunPayload = {
         jobTitle: jobTitle.trim(),
@@ -45,273 +124,275 @@ export function DashboardView() {
     }
   };
 
-  const handleResume = async (runId: string, _title: string) => {
+  const handleResume = async (runId: string) => {
     setResumingRunId(runId);
     try {
       await window.oculai.resumeRun(runId);
       setActiveRun(runId);
     } catch (err) {
-      // If resume fails, try direct navigation anyway
-      setActiveRun(runId);
-    } finally {
+      setError(err instanceof Error ? err.message : `无法恢复任务 ${runId}`);
       setResumingRunId(null);
     }
   };
 
-  const isReady =
-    systemStatus.db === "connected" &&
-    systemStatus.python === "ready" &&
-    systemStatus.llm === "configured";
+  const applyTemplate = (template: (typeof ROLE_TEMPLATES)[number]) => {
+    setJobTitle(template.title);
+    setSkills(template.skills);
+    setJdText(template.jd);
+    setError(null);
+  };
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-3xl mx-auto py-12 px-6">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <div className="flex items-center justify-center gap-3 mb-4">
-            <div className="w-12 h-12 rounded-xl bg-blue-600/20 flex items-center justify-center">
-              <Sparkles className="w-6 h-6 text-blue-400" />
+      <div className="mx-auto max-w-5xl px-8 py-10">
+        {/* ─── Hero ─── */}
+        <header className="mb-10">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent-soft">
+              <Sparkles className="h-5 w-5 text-accent" aria-hidden="true" />
             </div>
+            <span className="font-display text-[11px] font-semibold uppercase tracking-[0.28em] text-accent">
+              Oculai Talent Intelligence
+            </span>
           </div>
-          <h1 className="text-2xl font-bold text-gray-100 mb-2">
-            Oculai Talent Sourcing
+          <h1 className="font-display text-4xl font-bold tracking-tight text-ink">
+            中国候选人优先的
+            <br />
+            多 Agent 智能寻访
           </h1>
-          <p className="text-sm text-gray-500 max-w-md mx-auto">
-            Multi-agent AI-powered talent sourcing for Chinese HRs.
-            Enter a job description below to discover top candidates
-            across academic, industry, and Chinese platforms.
+          <p className="mt-3 max-w-xl text-sm leading-6 text-ink-secondary">
+            粘贴 JD，Pi 自主规划搜索策略，并行调用来源，沉淀证据与评分，生成可交付报告。
           </p>
-        </div>
 
-        {/* System status */}
-        {!isReady && (
-          <div className="panel p-4 mb-6 border-yellow-800">
-            <p className="text-sm text-yellow-400 font-medium mb-2">
-              System not fully ready
-            </p>
-            <div className="grid grid-cols-3 gap-3 text-xs">
-              <StatusItem label="Database" status={systemStatus.db} />
-              <StatusItem label="Python Engine" status={systemStatus.python} />
-              <StatusItem label="AI Model" status={systemStatus.llm} />
-            </div>
+          {/* Status inline */}
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <HealthDot label="数据库" status={systemStatus.db} />
+            <HealthDot label="Python" status={systemStatus.python} />
+            <HealthDot label="AI 模型" status={systemStatus.llm} />
+            {!isReady && (
+              <span className="text-xs text-semantic-warning">
+                请先在设置中完成配置
+              </span>
+            )}
           </div>
-        )}
+        </header>
 
-        {/* JD Input Form */}
-        <div className="panel p-6 mb-6">
-          <h2 className="text-sm font-semibold text-gray-300 mb-4 flex items-center gap-2">
-            <Search className="w-4 h-4" /> Job Description
-          </h2>
+        {/* ─── Main Grid ─── */}
+        <div className="grid gap-8 lg:grid-cols-[1fr_18rem]">
+          {/* ─── JD Form ─── */}
+          <section className="space-y-5">
+            <div className="panel p-6">
+              <div className="space-y-5">
+                <div>
+                  <label
+                    htmlFor="job-title"
+                    className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-muted"
+                  >
+                    岗位名称
+                  </label>
+                  <input
+                    id="job-title"
+                    type="text"
+                    className="input text-[15px]"
+                    placeholder="资深 NLP 研究员、平台工程师…"
+                    value={jobTitle}
+                    onChange={(e) => setJobTitle(e.target.value)}
+                  />
+                </div>
 
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Job Title
-              </label>
-              <input
-                type="text"
-                className="input"
-                placeholder="e.g. Senior NLP Researcher, ML Engineer..."
-                value={jobTitle}
-                onChange={(e) => setJobTitle(e.target.value)}
-              />
-            </div>
+                <div>
+                  <label
+                    htmlFor="jd-text"
+                    className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-muted"
+                  >
+                    Job Description
+                  </label>
+                  <textarea
+                    id="jd-text"
+                    className="input min-h-[280px] resize-y font-mono text-[13px] leading-relaxed"
+                    placeholder="公司背景 · 职责 · 硬性要求 · 加分项 · 资深度 · 地点偏好…"
+                    value={jdText}
+                    onChange={(e) => setJdText(e.target.value)}
+                  />
+                </div>
 
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Job Description (JD)
-              </label>
-              <textarea
-                className="input min-h-[200px] resize-y font-mono text-xs"
-                placeholder="Paste the full job description here...
-Include: company context, responsibilities, required qualifications,
-preferred experience, location, etc."
-                value={jdText}
-                onChange={(e) => setJdText(e.target.value)}
-              />
-            </div>
+                <div>
+                  <label
+                    htmlFor="skills"
+                    className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-muted"
+                  >
+                    技能（逗号分隔）
+                  </label>
+                  <input
+                    id="skills"
+                    type="text"
+                    className="input"
+                    placeholder="PyTorch, Transformer, NLP, LLM…"
+                    value={skills}
+                    onChange={(e) => setSkills(e.target.value)}
+                  />
+                </div>
+              </div>
 
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Required Skills (comma-separated)
-              </label>
-              <input
-                type="text"
-                className="input"
-                placeholder="e.g. PyTorch, Transformer, NLP, CUDA, LLM"
-                value={skills}
-                onChange={(e) => setSkills(e.target.value)}
-              />
-            </div>
-          </div>
-
-          {error && (
-            <div className="mt-4 p-3 bg-red-900/30 border border-red-800 rounded-lg">
-              <p className="text-sm text-red-400">{error}</p>
-            </div>
-          )}
-
-          <div className="mt-6 flex items-center justify-between">
-            <p className="text-xs text-gray-600">
-              {isReady
-                ? "Ready — AI agent will orchestrate the full pipeline"
-                : "Configure API keys in Settings to enable AI agent"}
-            </p>
-            <button
-              className="btn-primary flex items-center gap-2"
-              disabled={!canStart}
-              onClick={handleStart}
-            >
-              {isStarting ? (
-                <>Starting...</>
-              ) : (
-                <>
-                  Start Sourcing
-                  <ArrowRight className="w-4 h-4" />
-                </>
+              {error && (
+                <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3" role="alert">
+                  <p className="text-sm text-red-700">{error}</p>
+                </div>
               )}
-            </button>
-          </div>
+
+              <div className="mt-6 flex items-center justify-between border-t border-rule pt-5">
+                <p className="text-xs leading-5 text-ink-muted">
+                  {isReady ? "就绪 — Pi 将自主规划搜索与评估" : "请完成数据库、Python 与模型配置"}
+                </p>
+                <button
+                  type="button"
+                  className="btn-primary min-w-[140px]"
+                  disabled={!canStart}
+                  onClick={handleStart}
+                >
+                  {isStarting ? (
+                    <LoadingInline label="启动中" />
+                  ) : (
+                    <>
+                      开始寻访
+                      <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {/* ─── Right Rail ─── */}
+          <aside className="space-y-4">
+            {/* JD Checklist */}
+            <div className="panel p-4">
+              <h3 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                <ClipboardList className="h-3.5 w-3.5" aria-hidden="true" />
+                JD 完整度
+              </h3>
+              <ChecklistItem ok={Boolean(jobTitle.trim())} label="岗位名称" />
+              <ChecklistItem ok={jdText.length >= 300} label="JD ≥ 300 字" />
+              <ChecklistItem ok={skillCount >= 3} label={`技能 ≥ 3 项（${skillCount}）`} />
+              <ChecklistItem ok={hasLocation} label="中国地点/时区" />
+            </div>
+
+            {/* Templates */}
+            <div className="panel p-4">
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                快速模板
+              </h3>
+              <div className="space-y-1.5">
+                {ROLE_TEMPLATES.map((template) => (
+                  <button
+                    key={template.title}
+                    type="button"
+                    className="w-full rounded-lg px-3 py-2 text-left text-xs text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
+                    onClick={() => applyTemplate(template)}
+                  >
+                    {template.title}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Guide — minimal icons */}
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+              <GuideCard icon={Globe} title="多来源搜索" />
+              <GuideCard icon={Zap} title="智能评估" />
+              <GuideCard icon={FileText} title="报告交付" />
+            </div>
+          </aside>
         </div>
 
-        {/* Quick guide */}
-        <div className="grid grid-cols-3 gap-4">
-          <GuideCard
-            icon={Search}
-            title="1. Multi-Source Search"
-            desc="Searches across 16 sources including Chinese platforms (Zhihu, Juejin, CSDN)"
-          />
-          <GuideCard
-            icon={Users}
-            title="2. Smart Evaluation"
-            desc="AI-powered multi-dimensional assessment with China-market calibration"
-          />
-          <GuideCard
-            icon={FileText}
-            title="3. Polished Report"
-            desc="Self-contained HTML dashboard with score charts and candidate cards"
-          />
-        </div>
-
-        {/* Recent Runs */}
-        <div className="mt-10">
-          <div className="flex items-center gap-2 mb-4">
-            <Clock className="w-4 h-4 text-gray-400" />
-            <h2 className="text-sm font-semibold text-gray-300">Recent Runs</h2>
+        {/* ─── Recent Runs ─── */}
+        <section className="mt-10">
+          <div className="mb-4 flex items-center gap-2">
+            <Calendar className="h-4 w-4 text-ink-muted" aria-hidden="true" />
+            <h2 className="text-sm font-semibold text-ink">最近任务</h2>
             {runs.length > 0 && (
-              <span className="text-xs text-gray-600 ml-1">({runs.length})</span>
+              <span className="text-xs text-ink-muted">({runs.length})</span>
             )}
           </div>
 
           {runs.length === 0 ? (
-            <div className="panel p-8 text-center">
-              <div className="w-12 h-12 rounded-full bg-gray-800 flex items-center justify-center mx-auto mb-3">
-                <RotateCcw className="w-5 h-5 text-gray-500" />
-              </div>
-              <p className="text-sm text-gray-400 mb-1">No previous runs</p>
-              <p className="text-xs text-gray-600">
-                Start your first sourcing run above.
-              </p>
+            <div className="panel">
+              <EmptyState
+                icon={RotateCcw}
+                title="暂无历史任务"
+                description="完成第一个 JD 后，这里会显示可恢复的寻访记录。"
+              />
             </div>
           ) : (
-            <div className="grid gap-3">
+            <div className="grid gap-3 lg:grid-cols-2">
               {runs.slice(0, 10).map((run) => (
                 <button
                   key={run.run_id}
-                  onClick={() => handleResume(run.run_id, run.title)}
+                  type="button"
+                  onClick={() => handleResume(run.run_id)}
                   disabled={resumingRunId === run.run_id}
-                  className="panel p-4 text-left hover:border-gray-600 transition-colors w-full"
+                  className="panel w-full p-4 text-left transition-colors hover:border-rule-hover disabled:opacity-50"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="text-sm font-medium text-gray-200 truncate">
-                          {run.title}
-                        </h3>
-                        <StatusBadge status={run.status} />
+                      <div className="mb-1.5 flex items-center gap-2">
+                        <h3 className="truncate text-sm font-semibold text-ink">{run.title}</h3>
+                        <RunStatusBadge status={run.status} />
                       </div>
-                      <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                      <div className="flex flex-wrap items-center gap-3 text-[11px] text-ink-muted">
                         <span className="flex items-center gap-1">
-                          <Calendar className="w-3 h-3" />
+                          <Calendar className="h-3 w-3" aria-hidden="true" />
                           {formatDate(run.created_at)}
                         </span>
                         {run.candidate_count !== undefined && run.candidate_count > 0 && (
                           <span className="flex items-center gap-1">
-                            <Users className="w-3 h-3" />
-                            {run.candidate_count} candidate{run.candidate_count !== 1 ? "s" : ""}
-                          </span>
-                        )}
-                        {run.task_count !== undefined && (
-                          <span>
-                            {run.completed_task_count ?? 0}/{run.task_count} tasks
+                            <Users className="h-3 w-3" aria-hidden="true" />
+                            {run.candidate_count} 人
                           </span>
                         )}
                       </div>
                     </div>
-                    <div className="flex-shrink-0 flex items-center gap-1 text-xs text-gray-500">
-                      {resumingRunId === run.run_id ? (
-                        <span className="text-blue-400">Loading...</span>
-                      ) : (
-                        <>
-                          <span className="text-blue-400">Resume</span>
-                          <ArrowRight className="w-3 h-3 text-blue-400" />
-                        </>
-                      )}
+                    <div className="flex shrink-0 items-center gap-1 text-xs font-semibold text-accent">
+                      {resumingRunId === run.run_id ? "…" : "恢复"}
+                      <ArrowRight className="h-3 w-3" aria-hidden="true" />
                     </div>
                   </div>
                 </button>
               ))}
-              {runs.length > 10 && (
-                <p className="text-[11px] text-gray-600 text-center mt-1">
-                  Showing 10 of {runs.length} runs. Older runs are available in the sidebar.
-                </p>
-              )}
             </div>
           )}
-        </div>
+        </section>
       </div>
     </div>
   );
 }
 
-function StatusItem({ label, status }: { label: string; status: string }) {
-  const color =
-    status === "connected" || status === "ready" || status === "configured"
-      ? "text-green-400"
-      : status === "connecting" || status === "starting"
-        ? "text-yellow-400"
-        : "text-red-400";
+/* ─── Helpers ─── */
+
+function ChecklistItem({ ok, label }: { ok: boolean; label: string }) {
   return (
-    <div>
-      <span className="text-gray-500">{label}: </span>
-      <span className={color}>{status}</span>
+    <div className="flex items-center gap-2 py-1.5 text-xs">
+      <CheckCircle2
+        className={cx("h-3.5 w-3.5", ok ? "text-semantic-success" : "text-rule-strong")}
+        aria-hidden="true"
+      />
+      <span className={ok ? "text-ink" : "text-ink-muted"}>{label}</span>
     </div>
   );
 }
 
-function StatusBadge({ status }: { status: RunStatus }) {
-  const colorMap: Record<RunStatus, string> = {
-    draft: "bg-gray-700 text-gray-300 border-gray-600",
-    running: "bg-green-900/40 text-green-400 border-green-800",
-    paused: "bg-yellow-900/40 text-yellow-400 border-yellow-800",
-    reviewing: "bg-purple-900/40 text-purple-400 border-purple-800",
-    completed: "bg-blue-900/40 text-blue-400 border-blue-800",
-    aborted: "bg-red-900/40 text-red-400 border-red-800",
-  };
-
-  const labelMap: Record<RunStatus, string> = {
-    draft: "Draft",
-    running: "Running",
-    paused: "Paused",
-    reviewing: "Review",
-    completed: "Done",
-    aborted: "Aborted",
-  };
-
+function GuideCard({
+  icon: Icon,
+  title,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+}) {
   return (
-    <span className={`text-[10px] px-1.5 py-0.5 rounded border ${colorMap[status] ?? colorMap.draft}`}>
-      {labelMap[status] ?? status}
-    </span>
+    <div className="panel flex items-center gap-3 p-4">
+      <Icon className="h-4 w-4 text-accent shrink-0" aria-hidden="true" />
+      <span className="text-xs font-medium text-ink">{title}</span>
+    </div>
   );
 }
 
@@ -324,12 +405,12 @@ function formatDate(iso: string): string {
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
 
-    if (diffMins < 1) return "Just now";
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
+    if (diffMins < 1) return "刚刚";
+    if (diffMins < 60) return `${diffMins} 分钟前`;
+    if (diffHours < 24) return `${diffHours} 小时前`;
+    if (diffDays < 7) return `${diffDays} 天前`;
 
-    return d.toLocaleDateString("en-US", {
+    return d.toLocaleDateString("zh-CN", {
       month: "short",
       day: "numeric",
       year: d.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
@@ -337,24 +418,4 @@ function formatDate(iso: string): string {
   } catch {
     return iso.slice(0, 10);
   }
-}
-
-function GuideCard({
-  icon: Icon,
-  title,
-  desc,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  desc: string;
-}) {
-  return (
-    <div className="panel p-4">
-      <div className="flex items-center gap-2 mb-2">
-        <Icon className="w-4 h-4 text-blue-400" />
-        <h3 className="text-sm font-medium text-gray-300">{title}</h3>
-      </div>
-      <p className="text-xs text-gray-500 leading-relaxed">{desc}</p>
-    </div>
-  );
 }
