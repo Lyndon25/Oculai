@@ -100,9 +100,9 @@ export function SettingsView() {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 p-4 backdrop-blur-md">
       <div
-        className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-rule bg-surface shadow-2xl"
+        className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-rule bg-surface shadow-xl animate-scale-in"
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-title"
@@ -110,8 +110,8 @@ export function SettingsView() {
         {/* Header */}
         <div className="flex items-center justify-between border-b border-rule px-6 py-4">
           <div>
-            <h2 id="settings-title" className="font-display text-lg font-semibold text-ink">设置</h2>
-            <p className="mt-0.5 text-xs text-ink-muted">配置模型、来源与运行参数</p>
+            <h2 id="settings-title" className="font-display text-xl text-ink tracking-tight">设置</h2>
+            <p className="mt-0.5 text-[12px] text-ink-muted">配置模型、来源与运行参数</p>
           </div>
           <button
             className="btn-ghost min-h-0 p-2"
@@ -124,21 +124,22 @@ export function SettingsView() {
 
         <div className="flex min-h-0 flex-1 overflow-hidden">
           {/* Tab sidebar */}
-          <div className="w-40 shrink-0 border-r border-rule p-2">
+          <div className="w-44 shrink-0 border-r border-rule p-2.5">
             <div className="space-y-0.5" role="tablist" aria-label="设置分类">
               {TABS.map((tab) => {
                 const Icon = tab.icon;
+                const isActive = activeTab === tab.id;
                 return (
                   <button
                     key={tab.id}
                     type="button"
                     role="tab"
-                    aria-selected={activeTab === tab.id}
+                    aria-selected={isActive}
                     onClick={() => setActiveTab(tab.id)}
                     className={cx(
-                      "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-all duration-150",
-                      activeTab === tab.id
-                        ? "bg-accent-soft text-accent font-semibold"
+                      "flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] transition-all duration-200",
+                      isActive
+                        ? "bg-accent-soft text-accent font-semibold ring-1 ring-accent/10"
                         : "text-ink-secondary hover:bg-surface-hover hover:text-ink",
                     )}
                   >
@@ -155,13 +156,13 @@ export function SettingsView() {
             {activeTab === "llm" && (
               <section className="space-y-5" aria-label="模型配置">
                 <div>
-                  <h3 className="text-sm font-semibold text-ink">LLM 配置</h3>
-                  <p className="mt-1 text-xs leading-5 text-ink-muted">
+                  <h3 className="text-[15px] font-semibold text-ink tracking-tight">LLM 配置</h3>
+                  <p className="mt-1 text-[12px] leading-5 text-ink-muted">
                     Pi Agent 通过这里的 Provider 和 Model 启动。
                   </p>
                 </div>
                 <div>
-                  <label htmlFor="llm-provider" className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-muted">Provider</label>
+                  <label htmlFor="llm-provider" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-muted">Provider</label>
                   <select
                     id="llm-provider"
                     className="input"
@@ -175,7 +176,7 @@ export function SettingsView() {
                   </select>
                 </div>
                 <div>
-                  <label htmlFor="llm-model" className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-muted">Model</label>
+                  <label htmlFor="llm-model" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-muted">Model</label>
                   <input
                     id="llm-model"
                     type="text"
@@ -185,7 +186,7 @@ export function SettingsView() {
                   />
                 </div>
                 <div>
-                  <label htmlFor="thinking-level" className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-muted">Thinking Level</label>
+                  <label htmlFor="thinking-level" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-muted">Thinking Level</label>
                   <select
                     id="thinking-level"
                     className="input"
@@ -204,24 +205,22 @@ export function SettingsView() {
             {activeTab === "api-keys" && (
               <section className="space-y-5" aria-label="API 密钥">
                 <div>
-                  <h3 className="text-sm font-semibold text-ink">API Keys</h3>
-                  <p className="mt-1 text-xs leading-5 text-ink-muted">留空不覆盖已保存密钥。</p>
+                  <h3 className="text-[15px] font-semibold text-ink tracking-tight">API Keys</h3>
+                  <p className="mt-1 text-[12px] leading-5 text-ink-muted">留空不覆盖已保存密钥。</p>
                 </div>
                 <div className="grid gap-3">
                   {API_KEY_PROVIDERS.map((provider) => (
-                    <div key={provider.id} className="rounded-xl border border-rule bg-surface-hover/50 p-3.5">
-                      <div className="mb-2 flex items-start justify-between gap-3">
+                    <div key={provider.id} className="rounded-xl border border-rule bg-surface-hover/50 p-4">
+                      <div className="mb-2.5 flex items-start justify-between gap-3">
                         <div>
-                          <label htmlFor={`api-key-${provider.id}`} className="text-xs font-semibold text-ink">
+                          <label htmlFor={`api-key-${provider.id}`} className="text-[13px] font-semibold text-ink">
                             {provider.label}
                           </label>
                           <p className="mt-0.5 text-[11px] leading-4 text-ink-muted">{provider.description}</p>
                         </div>
                         <span className={cx(
-                          "badge border text-[11px]",
-                          apiKeyStatus[provider.id]
-                            ? "badge-success"
-                            : "badge-neutral",
+                          "badge text-[10px]",
+                          apiKeyStatus[provider.id] ? "badge-success" : "badge-neutral",
                         )}>
                           {apiKeyStatus[provider.id] ? "已配置" : "未配置"}
                         </span>
@@ -244,11 +243,11 @@ export function SettingsView() {
             {activeTab === "database" && (
               <section className="space-y-5" aria-label="数据库配置">
                 <div>
-                  <h3 className="text-sm font-semibold text-ink">PostgreSQL 配置</h3>
-                  <p className="mt-1 text-xs leading-5 text-ink-muted">桌面版内置 PostgreSQL。端口为 0 时自动分配。</p>
+                  <h3 className="text-[15px] font-semibold text-ink tracking-tight">PostgreSQL 配置</h3>
+                  <p className="mt-1 text-[12px] leading-5 text-ink-muted">桌面版内置 PostgreSQL。端口为 0 时自动分配。</p>
                 </div>
                 <div>
-                  <label htmlFor="db-port" className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-muted">Port</label>
+                  <label htmlFor="db-port" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-muted">Port</label>
                   <input
                     id="db-port"
                     type="number"
@@ -271,10 +270,10 @@ export function SettingsView() {
               <section className="space-y-5" aria-label="来源开关">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <h3 className="text-sm font-semibold text-ink">数据来源</h3>
-                    <p className="mt-1 text-xs leading-5 text-ink-muted">China-First 来源已标注。</p>
+                    <h3 className="text-[15px] font-semibold text-ink tracking-tight">数据来源</h3>
+                    <p className="mt-1 text-[12px] leading-5 text-ink-muted">China-First 来源已标注。</p>
                   </div>
-                  <span className="badge-accent">
+                  <span className="badge-accent text-[10px]">
                     {Object.keys(enabledSources).length
                       ? Object.values(enabledSources).filter((v) => v !== false).length
                       : Object.keys(SOURCE_LABELS).length} enabled
@@ -297,12 +296,12 @@ export function SettingsView() {
             {activeTab === "advanced" && (
               <section className="space-y-5" aria-label="高级设置">
                 <div>
-                  <h3 className="text-sm font-semibold text-ink">高级运行参数</h3>
-                  <p className="mt-1 text-xs leading-5 text-ink-muted">保存到本地设置；具体生效取决于 Pi 会话。</p>
+                  <h3 className="text-[15px] font-semibold text-ink tracking-tight">高级运行参数</h3>
+                  <p className="mt-1 text-[12px] leading-5 text-ink-muted">保存到本地设置；具体生效取决于 Pi 会话。</p>
                 </div>
                 <div className="grid gap-4 md:grid-cols-3">
                   <div>
-                    <label htmlFor="max-iterations" className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-muted">Max Iterations</label>
+                    <label htmlFor="max-iterations" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-muted">Max Iterations</label>
                     <input
                       id="max-iterations"
                       type="number"
@@ -313,7 +312,7 @@ export function SettingsView() {
                     />
                   </div>
                   <div>
-                    <label htmlFor="token-budget" className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-muted">Token Budget</label>
+                    <label htmlFor="token-budget" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-muted">Token Budget</label>
                     <input
                       id="token-budget"
                       type="number"
@@ -325,7 +324,7 @@ export function SettingsView() {
                     />
                   </div>
                   <div>
-                    <label htmlFor="concurrency" className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-muted">Concurrency</label>
+                    <label htmlFor="concurrency" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-muted">Concurrency</label>
                     <input
                       id="concurrency"
                       type="number"
@@ -343,9 +342,13 @@ export function SettingsView() {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between border-t border-rule px-6 py-3.5">
+        <div className="flex items-center justify-between border-t border-rule px-6 py-4">
           <div className="min-h-5">
-            {saved && <span className="text-xs font-medium text-emerald-600">设置已保存</span>}
+            {saved && (
+              <span className="text-[13px] font-medium text-success animate-fade-up">
+                设置已保存
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button className="btn-secondary" onClick={() => setSettingsOpen(false)} type="button">

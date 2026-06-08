@@ -22,7 +22,6 @@ export function ReportTab() {
       const data = result as { html_content?: string; html?: string };
       const html = data.html_content ?? data.html;
       if (html) {
-        // IPC event (report:ready) may have already set this; ensure it's set
         if (!useStore.getState().reportHtml) {
           setReportHtml(html);
         }
@@ -70,7 +69,7 @@ export function ReportTab() {
           }
         />
         {error && (
-          <p className="px-6 text-center text-sm text-semantic-error" role="alert">
+          <p className="px-6 text-center text-[13px] text-error" role="alert">
             {error}
           </p>
         )}
@@ -82,17 +81,17 @@ export function ReportTab() {
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-rule bg-surface px-4 py-2.5">
         <div>
-          <span className="text-sm font-semibold text-ink">HTML 报告预览</span>
-          <p className="text-[11px] text-ink-muted">静态沙箱预览；下载后可独立打开。</p>
+          <span className="text-[13px] font-semibold text-ink tracking-tight">HTML 报告预览</span>
+          <p className="text-[10px] text-ink-muted mt-0.5">静态沙箱预览；下载后可独立打开。</p>
         </div>
         <div className="flex items-center gap-2">
           {error && (
-            <span className="text-xs text-semantic-error" role="alert">
+            <span className="text-[12px] text-error" role="alert">
               {error}
             </span>
           )}
           <button
-            className="btn-secondary text-xs"
+            className="btn-secondary text-[12px]"
             onClick={handleExport}
             disabled={exporting}
             type="button"
@@ -106,7 +105,7 @@ export function ReportTab() {
               </>
             )}
           </button>
-          <button className="btn-primary text-xs" onClick={handleDownload} type="button">
+          <button className="btn-primary text-[12px]" onClick={handleDownload} type="button">
             <Download className="h-3.5 w-3.5" aria-hidden="true" />
             下载 HTML
           </button>

@@ -33,7 +33,6 @@ export function CandidatesTab() {
     setLoading(true);
     try {
       const detail = await window.oculai.getCandidateDetail({ personId });
-      // Only apply if this is still the most recently requested candidate
       if (loadingPersonId.current === personId) {
         setSelectedCandidate((detail as CandidateDetail | null) ?? null);
       }
@@ -75,7 +74,7 @@ export function CandidatesTab() {
               onChange={(e) => setFilter(e.target.value)}
             />
           </div>
-          <p className="mt-1 text-[11px] text-ink-muted">
+          <p className="mt-1.5 text-[10px] text-ink-muted font-medium">
             {filtered.length} / {candidates.length}
           </p>
         </div>
@@ -131,21 +130,23 @@ function CandidateListItem({
       type="button"
       onClick={onSelect}
       className={cx(
-        "w-full border-b border-rule p-3 text-left transition-colors hover:bg-surface-hover",
-        selected && "border-l-2 border-l-accent bg-accent-soft",
+        "w-full border-b border-rule p-3 text-left transition-all duration-200 hover:bg-surface-hover",
+        selected && "border-l-[3px] border-l-accent bg-accent-soft",
       )}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-ink">{candidate.canonical_name}</div>
+          <div className="truncate text-[13px] font-semibold text-ink tracking-tight">
+            {candidate.canonical_name}
+          </div>
           {candidate.latest_institution && (
-            <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-ink-muted">
+            <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-ink-muted">
               <MapPin className="h-3 w-3 shrink-0" aria-hidden="true" />
               {candidate.latest_institution}
             </p>
           )}
           {candidate.latest_position && (
-            <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-ink-muted">
+            <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-ink-muted">
               <BriefcaseBusiness className="h-3 w-3 shrink-0" aria-hidden="true" />
               {candidate.latest_position}
             </p>
@@ -156,7 +157,7 @@ function CandidateListItem({
       {candidate.research_areas && candidate.research_areas.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">
           {candidate.research_areas.slice(0, 3).map((area) => (
-            <span key={area} className="rounded-full bg-surface-hover px-2 py-0.5 text-[10px] text-ink-muted">
+            <span key={area} className="rounded-full bg-surface-hover px-2 py-0.5 text-[10px] text-ink-muted font-medium">
               {area}
             </span>
           ))}
@@ -174,21 +175,23 @@ function CandidateDetailView({ candidate }: { candidate: CandidateDetail }) {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="panel p-5">
+      <div className="card p-5">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0">
-            <h2 className="truncate font-display text-2xl font-bold text-ink">{candidate.canonical_name}</h2>
-            <div className="mt-2 flex flex-wrap items-center gap-3">
+            <h2 className="truncate font-display text-2xl text-ink tracking-tight">
+              {candidate.canonical_name}
+            </h2>
+            <div className="mt-2.5 flex flex-wrap items-center gap-3">
               {candidate.latest_institution && (
-                <span className="flex items-center gap-1 text-sm text-ink-secondary">
+                <span className="flex items-center gap-1 text-[13px] text-ink-secondary">
                   <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
                   {candidate.latest_institution}
                 </span>
               )}
               {candidate.latest_position && (
-                <span className="text-sm text-ink-secondary">{candidate.latest_position}</span>
+                <span className="text-[13px] text-ink-secondary">{candidate.latest_position}</span>
               )}
-              <ScorePill score={candidate.quality_score} />
+              <ScorePill score={candidate.quality_score} size="md" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:w-[26rem]">
@@ -203,13 +206,13 @@ function CandidateDetailView({ candidate }: { candidate: CandidateDetail }) {
       {/* Identities */}
       {candidate.identities && candidate.identities.length > 0 && (
         <Section title={`外部身份 (${candidate.identities.length})`}>
-          <div className="grid gap-2">
+          <div className="grid gap-1.5">
             {candidate.identities.map((id, i) => (
               <div
                 key={`${id.source_type}-${id.external_id}-${i}`}
-                className="flex items-center justify-between gap-3 rounded-lg bg-surface-hover p-2 text-sm"
+                className="flex items-center justify-between gap-3 rounded-lg bg-surface-hover px-3 py-2 text-sm"
               >
-                <span className="shrink-0 text-ink-muted">{id.source_type}</span>
+                <span className="shrink-0 text-xs font-medium text-ink-muted">{id.source_type}</span>
                 <a
                   href={id.external_url || "#"}
                   target="_blank"
@@ -222,10 +225,10 @@ function CandidateDetailView({ candidate }: { candidate: CandidateDetail }) {
                     if (!id.external_url) e.preventDefault();
                   }}
                 >
-                  <span className="truncate font-mono text-xs">{id.external_id}</span>
+                  <span className="truncate font-mono text-[11px]">{id.external_id}</span>
                   {id.external_url && <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />}
                 </a>
-                <span className="shrink-0 font-mono text-xs text-ink-muted">
+                <span className="shrink-0 font-mono text-[11px] text-ink-muted">
                   {(id.confidence * 100).toFixed(0)}%
                 </span>
               </div>
@@ -242,20 +245,20 @@ function CandidateDetailView({ candidate }: { candidate: CandidateDetail }) {
               <div key={`${assessment.assessment_id}-${i}`} className="rounded-lg bg-surface-hover p-3 text-sm">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <span className="font-semibold text-ink">{assessment.dimension}</span>
+                    <span className="font-semibold text-ink text-[13px]">{assessment.dimension}</span>
                     {assessment.assessor_agent && (
-                      <span className="ml-2 text-xs text-ink-muted">by {assessment.assessor_agent}</span>
+                      <span className="ml-2 text-[11px] text-ink-muted">by {assessment.assessor_agent}</span>
                     )}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <span className="font-mono text-sm font-bold text-accent">{assessment.score.toFixed(1)}</span>
-                    <span className="font-mono text-xs text-ink-muted">
+                    <span className="font-mono text-[11px] text-ink-muted">
                       {(assessment.confidence * 100).toFixed(0)}%
                     </span>
                   </div>
                 </div>
                 {assessment.rationale && (
-                  <p className="mt-2 text-xs leading-5 text-ink-secondary">{assessment.rationale}</p>
+                  <p className="mt-2 text-[12px] leading-5 text-ink-secondary">{assessment.rationale}</p>
                 )}
               </div>
             ))}
@@ -266,9 +269,9 @@ function CandidateDetailView({ candidate }: { candidate: CandidateDetail }) {
       {/* Evidence */}
       {evidence.length > 0 && (
         <Section title={`证据 (${evidence.length})`}>
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             {evidence.map((ev, i) => (
-              <div key={`${ev.evidence_id}-${i}`} className="rounded-lg bg-surface-hover p-3 text-sm">
+              <div key={`${ev.evidence_id}-${i}`} className="rounded-lg bg-surface-hover p-3 text-sm transition-colors hover:bg-warm-100">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     {ev.source_url ? (
@@ -276,18 +279,18 @@ function CandidateDetailView({ candidate }: { candidate: CandidateDetail }) {
                         href={ev.source_url}
                         target="_blank"
                         rel="noreferrer"
-                        className="font-semibold text-ink hover:text-accent"
+                        className="font-semibold text-ink text-[13px] hover:text-accent transition-colors"
                       >
                         {ev.title}
                       </a>
                     ) : (
-                      <span className="font-semibold text-ink">{ev.title}</span>
+                      <span className="font-semibold text-ink text-[13px]">{ev.title}</span>
                     )}
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-ink-muted">
                       <span>{ev.evidence_type}</span>
-                      <span>·</span>
+                      <span className="opacity-40">·</span>
                       <span>{ev.source_name}</span>
-                      <span>·</span>
+                      <span className="opacity-40">·</span>
                       <span>conf {(ev.confidence * 100).toFixed(0)}%</span>
                     </div>
                   </div>
@@ -310,14 +313,14 @@ function CandidateDetailView({ candidate }: { candidate: CandidateDetail }) {
                     href={work.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="font-medium text-ink hover:text-accent"
+                    className="font-medium text-ink hover:text-accent transition-colors"
                   >
                     {work.title}
                   </a>
                 ) : (
                   <span className="font-medium text-ink">{work.title}</span>
                 )}
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-ink-muted">
                   {work.venue && <span>{work.venue}</span>}
                   {work.year && <span>{work.year}</span>}
                   {work.citations !== undefined && <span>{work.citations} citations</span>}
@@ -333,7 +336,7 @@ function CandidateDetailView({ candidate }: { candidate: CandidateDetail }) {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="panel overflow-hidden">
+    <div className="card overflow-hidden">
       <h3 className="panel-header">{title}</h3>
       <div className="p-4">{children}</div>
     </div>
@@ -350,10 +353,10 @@ function StatCard({
   value?: number;
 }) {
   return (
-    <div className="rounded-xl border border-rule bg-surface-hover p-3 text-center">
-      <Icon className="mx-auto mb-1 h-4 w-4 text-ink-muted" aria-hidden="true" />
+    <div className="rounded-xl bg-warm-100 p-3 text-center">
+      <Icon className="mx-auto mb-1 h-4 w-4 text-warm-500" aria-hidden="true" />
       <div className="font-mono text-lg font-bold text-ink">{value ?? "—"}</div>
-      <div className="text-[10px] text-ink-muted">{label}</div>
+      <div className="text-[10px] text-ink-muted font-medium">{label}</div>
     </div>
   );
 }

@@ -6,7 +6,7 @@ import { EvidenceTab } from "../evidence/EvidenceTab.js";
 import { ReportTab } from "../report/ReportTab.js";
 import { LogsTab } from "../logs/LogsTab.js";
 import { Users, FileSearch, FileText, ScrollText, ChevronUp, ChevronDown } from "lucide-react";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { cx } from "../ui/primitives.js";
 
 const BOTTOM_TABS = [
@@ -23,6 +23,17 @@ export function MainPanel() {
   const candidates = useStore((s) => s.candidates);
   const messages = useStore((s) => s.messages);
   const [drawerOpen, setDrawerOpen] = useState(true);
+  const drawerRef = useRef<HTMLDivElement>(null);
+
+  // Animate drawer height
+  useEffect(() => {
+    if (!drawerRef.current) return;
+    if (drawerOpen) {
+      drawerRef.current.style.height = "22rem";
+    } else {
+      drawerRef.current.style.height = "0px";
+    }
+  }, [drawerOpen]);
 
   if (!activeRunId) {
     return (
@@ -39,11 +50,12 @@ export function MainPanel() {
         <OrchestrationDashboard />
       </div>
 
-      {/* Tab bar */}
-      <div className="flex items-center justify-between border-t border-rule bg-surface px-4 py-1.5">
-        <div className="flex items-center gap-1" role="tablist" aria-label="Run detail tabs">
+      {/* Tab bar · Refined */}
+      <div className="flex items-center justify-between border-t border-rule bg-surface/80 backdrop-blur-sm px-3 py-1">
+        <div className="flex items-center gap-0.5" role="tablist" aria-label="Run detail tabs">
           {BOTTOM_TABS.map((tab) => {
             const Icon = tab.icon;
+            const isActive = activeBottomTab === tab.id;
             const badge =
               tab.id === "candidates"
                 ? candidates.length
@@ -55,22 +67,25 @@ export function MainPanel() {
                 key={tab.id}
                 type="button"
                 role="tab"
-                aria-selected={activeBottomTab === tab.id}
+                aria-selected={isActive}
                 onClick={() => {
                   setActiveTab(tab.id);
                   if (!drawerOpen) setDrawerOpen(true);
                 }}
                 className={cx(
-                  "flex min-h-[30px] items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-all duration-150",
-                  activeBottomTab === tab.id
-                    ? "bg-accent-soft text-accent"
+                  "tab-indicator flex min-h-[30px] items-center gap-1.5 rounded-lg px-3 text-[12px] font-medium transition-all duration-200",
+                  isActive
+                    ? "text-accent"
                     : "text-ink-muted hover:bg-surface-hover hover:text-ink-secondary",
                 )}
               >
                 <Icon className="h-3.5 w-3.5" aria-hidden="true" />
                 {tab.label}
                 {badge !== undefined && badge > 0 && (
-                  <span className="rounded-full bg-rule px-1.5 py-0.5 font-mono text-[10px] text-ink-secondary">
+                  <span className={cx(
+                    "rounded-full px-1.5 py-0.5 font-mono text-[10px] font-medium",
+                    isActive ? "bg-accent-soft text-accent" : "bg-surface-hover text-ink-muted",
+                  )}>
                     {badge}
                   </span>
                 )}
@@ -93,16 +108,18 @@ export function MainPanel() {
         </button>
       </div>
 
-      {/* Bottom Drawer */}
-      {drawerOpen && (
-        <div className="h-[22rem] min-h-0 overflow-hidden border-t border-rule bg-surface xl:h-96">
+      {/* Bottom Drawer · Animated */}
+      <div
+        ref={drawerRef}
+        className="min-h-0 overflow-hidden border-t border-rule bg-surface transition-all duration-400 ease-[var(--oc-spring-smooth)]"
+      >
+        <div className="h-full">
           {activeBottomTab === "candidates" && <CandidatesTab />}
           {activeBottomTab === "evidence" && <EvidenceTab />}
           {activeBottomTab === "report" && <ReportTab />}
           {activeBottomTab === "logs" && <LogsTab />}
-          {activeBottomTab === "pipeline" && <CandidatesTab />}
         </div>
-      )}
+      </div>
     </main>
   );
 }
