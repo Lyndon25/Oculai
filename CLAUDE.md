@@ -30,7 +30,7 @@ Oculai Desktop (Electron + React)
         │   └── JSONL protocol over stdin/stdout
         └── Pi AgentSession (pi-coding-agent SDK)
             ├── System prompt: role + constraints (~150 lines, src/shared/prompts.ts)
-            ├── 41 Oculai tools as extension tools (via createExtensionRuntime)
+            ├── 42 Oculai tools as extension tools (via createExtensionRuntime)
             └── 8 inline subagent profiles (via ResourceLoader.getAgentsFiles)
 ```
 
@@ -162,10 +162,10 @@ To add a new tool:
 4. If the tool needs desktop-app access, also add its schema to `OCULAI_TOOLS` in `oculai-desktop/src/main/pi-session.ts`
 
 ### Tool Registry & JSONL Server
-`tool_registry.py` extracts all 41 `@mcp.tool` functions into a flat `TOOL_REGISTRY` dict (`dict[str, Callable]`) where each handler accepts a plain `params: dict` and returns `dict`. This decouples the tools from FastMCP's decorator-based registration, enabling:
+`tool_registry.py` extracts all 42 `@mcp.tool` functions into a flat `TOOL_REGISTRY` dict (`dict[str, Callable]`) where each handler accepts a plain `params: dict` and returns `dict`. This decouples the tools from FastMCP's decorator-based registration, enabling:
 
 - **JSONL server** (`jsonl_server.py`): a stdio bridge that reads JSONL requests from stdin, dispatches to `TOOL_REGISTRY`, and writes JSONL responses to stdout. Used by the Electron desktop app's `ToolBridge` (`oculai-desktop/src/main/tool-bridge.ts`) which spawns the Python process as a sidecar.
-- **Pi extension registration**: the Electron main process registers all 41 tools as Pi extension tools that delegate to the JSONL bridge.
+- **Pi extension registration**: the Electron main process registers all 42 tools as Pi extension tools that delegate to the JSONL bridge.
 
 Protocol format:
 ```
@@ -176,7 +176,7 @@ Protocol format:
 ### Site Crawler & HTML Denoising
 `tools/site_crawler.py` provides BFS-based multi-page website crawling for deep candidate evidence discovery (personal homepages, lab pages, portfolios). `utils/html_denoise.py` converts raw HTML to clean Markdown ("fit_markdown"), removing navigation, ads, sidebars, and scripts — inspired by crawl4ai. The denoiser auto-detects JavaScript-heavy SPAs and falls back to Playwright rendering when needed.
 
-New tool: `oculai_crawl_site(start_url, max_pages, max_depth, same_domain_only)` → per-page Markdown, link graph, combined summary.
+New tools: `oculai_crawl_site(start_url, max_pages, max_depth, same_domain_only)` → per-page Markdown, link graph, combined summary. `oculai_firecrawl_scrape(url, formats, wait_for, run_id)` → single-page scraping via Firecrawl API (keyless or with key).
 
 ### Source connectors
 Sources follow the `IDataSource` ABC (`sources/base.py`):
@@ -208,6 +208,7 @@ Sources auto-register in `sources/registry.py` on import. Adding a new source re
 | zhihu (知乎) | None | Public API (zhihu.com/api/v4), people search + profile, may need browser UA |
 | csdn (中国开发者网络) | None | Search API + profile HTML scraping, technical blog platform |
 | duckduckgo | None | Free web search, no API key required (`pip install duckduckgo-search`). Name extraction from titles/snippets. |
+| firecrawl | None (optional) | Web search + single-page scrape + crawl via Firecrawl API. Keyless mode works from Node.js/browsers. Free API key (1000 credits/month) at https://firecrawl.dev/app/api-keys required for Python access. |
 | web_search (tool) | `TAVILY_API_KEY` or `EXA_API_KEY` | Not a source; MCP tool in `tools/web_search.py` |
 
 ### Database migrations
@@ -330,7 +331,7 @@ The `oculai-desktop/` directory is a standalone Electron application that packag
 2. `PostgresManager` initializes an embedded PostgreSQL instance (port 15432)
 3. `ToolBridge` spawns the Python JSONL server (`jsonl_server.py`) as a child process
 4. `Pi AgentSession` is created via `@earendil-works/pi-coding-agent` SDK
-5. All 41 Oculai tools are registered as Pi extension tools — each delegates to the Python sidecar via ToolBridge
+5. All 42 Oculai tools are registered as Pi extension tools — each delegates to the Python sidecar via ToolBridge
 6. IPC handlers are registered for renderer↔main communication
 7. Renderer loads (Vite dev server in dev, bundled HTML in production)
 
@@ -427,9 +428,9 @@ The following large artifacts exist in the repo tree — all are gitignored to p
 | `oculai-mcp/src/oculai_mcp/tools/` | Domain tool implementations (sources, candidates, evidence, evidence tiers, assessment, assessment weights, deep search, deep dive, site crawler, review orchestrator, report, outreach, browser, web search) |
 | `oculai-mcp/src/oculai_mcp/sources/` | Source connectors (arXiv, DBLP, GitHub, Semantic Scholar, OpenAlex, ACL Anthology, PMLR, Baidu, DuckDuckGo, homepage, Juejin, Zhihu, CSDN, industry, conference) |
 | `oculai-mcp/src/oculai_mcp/utils/` | Utilities (Chinese name extraction, HTML denoising/markdown conversion) |
-| `oculai-mcp/src/oculai_mcp/server.py` | FastMCP server — 41 `@mcp.tool` decorated functions |
+| `oculai-mcp/src/oculai_mcp/server.py` | FastMCP server — 42 `@mcp.tool` decorated functions |
 | `oculai-mcp/src/oculai_mcp/jsonl_server.py` | JSONL stdio bridge for Electron sidecar communication |
-| `oculai-mcp/src/oculai_mcp/tool_registry.py` | Flat `TOOL_REGISTRY` dict of all 41 tool handlers (no MCP dependency) |
+| `oculai-mcp/src/oculai_mcp/tool_registry.py` | Flat `TOOL_REGISTRY` dict of all 42 tool handlers (no MCP dependency) |
 | `oculai-mcp/tests/` | MCP/database smoke test script |
 | `oculai-desktop/` | Electron desktop application (React + TypeScript + Vite + Tailwind) |
 | `oculai-desktop/src/shared/` | IPC contract types, channel constants, event payloads |

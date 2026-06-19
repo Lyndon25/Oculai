@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # Person-name extraction helpers for Baidu web-search results
 # ---------------------------------------------------------------------------
 
-_NAME_SEPARATOR_RE = re.compile(r"^([^|\-·\-\s]{2,30})\s*[|\-·\-]\s*")
+_NAME_SEPARATOR_RE = re.compile(r"^(.{1,60}?)\s+[|·-]\s+")
 _CHINESE_NAME_RE = re.compile(r"^[一-鿿]{2,4}")
 _AUTHOR_PREFIX_RE = re.compile(r"(?:作者|by|writer)[:\s]*(.{2,30})", re.I)
 

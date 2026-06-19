@@ -28,6 +28,7 @@ from oculai_mcp.tools import web_search, outreach, browser
 from oculai_mcp.tools import deep_search as deep_search_tool
 from oculai_mcp.tools import site_crawler
 from oculai_mcp.tools import review_orchestrator as review
+from oculai_mcp.tools import firecrawl_scrape
 
 
 # ============================================================================
@@ -291,6 +292,21 @@ async def _oculai_get_search_progress(params: dict[str, Any]) -> dict[str, Any]:
     """Handler for oculai_get_search_progress."""
     run_id: str = params["run_id"]
     return await deep_search_tool.get_search_progress(UUID(run_id))
+
+
+async def _oculai_firecrawl_scrape(params: dict[str, Any]) -> dict[str, Any]:
+    """Handler for oculai_firecrawl_scrape."""
+    url: str = params["url"]
+    formats: list[str] | None = params.get("formats")
+    wait_for: int | None = params.get("wait_for")
+    run_id: str | None = params.get("run_id")
+
+    return await firecrawl_scrape.scrape_page(
+        url=url,
+        formats=formats,
+        wait_for=wait_for,
+        run_id=UUID(run_id) if run_id else None,
+    )
 
 
 async def _oculai_crawl_site(params: dict[str, Any]) -> dict[str, Any]:
@@ -722,6 +738,7 @@ TOOL_REGISTRY: dict[str, Callable[..., Any]] = {
     "oculai_search_source": _oculai_search_source,
     "oculai_deep_search": _oculai_deep_search,
     "oculai_get_search_progress": _oculai_get_search_progress,
+    "oculai_firecrawl_scrape": _oculai_firecrawl_scrape,
     "oculai_crawl_site": _oculai_crawl_site,
     # Source Detail (1)
     "oculai_fetch_source_detail": _oculai_fetch_source_detail,

@@ -58,6 +58,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     zhihu: true,
     csdn: true,
     duckduckgo: true,
+    firecrawl: true,
   },
 
   dbPort: 0, // 0 = auto-assign
@@ -126,7 +127,7 @@ export class SettingsStore {
       enabledSources: { ...safe.enabledSources },
       apiKeyStatus: Object.fromEntries(
         Object.keys(DEFAULT_SETTINGS.apiKeys)
-          .concat(["anthropic", "openai", "deepseek", "zhipu", "github", "semantic_scholar", "baidu", "tavily", "exa"])
+          .concat(["anthropic", "openai", "deepseek", "zhipu", "github", "semantic_scholar", "baidu", "tavily", "exa", "firecrawl"])
           .map((provider) => [provider, Boolean(apiKeys[provider])]),
       ),
     };

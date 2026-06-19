@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     github_token: str | None = None
     tavily_api_key: str | None = None
     exa_api_key: str | None = None
+    firecrawl_api_key: str | None = None
 
     @property
     def s2_api_key(self) -> str | None:
@@ -61,6 +62,7 @@ class Settings(BaseSettings):
     source_enable_zhihu: bool = True
     source_enable_csdn: bool = True
     source_enable_duckduckgo: bool = True
+    source_enable_firecrawl: bool = True
 
     model_config = SettingsConfigDict(
         env_file=str(_ENV_FILE_PATH), env_file_encoding="utf-8"

@@ -18,6 +18,7 @@ from uuid import UUID
 
 import httpx
 
+from oculai_mcp.config import get_settings
 from oculai_mcp.db.provenance import log_source_call
 from oculai_mcp.utils.html_denoise import html_to_fit_markdown, is_likely_dynamic_page
 
@@ -157,6 +158,82 @@ async def crawl_site(
             "status": "error",
             "error": {"code": "invalid_url", "message": f"Invalid start URL: {start_url}"},
         }
+
+    # --- Firecrawl crawl fast path (when API key is available) ---
+    try:
+        settings = get_settings()
+        fc_key = getattr(settings, "firecrawl_api_key", None)
+        if fc_key:
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                fc_headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {fc_key}",
+                }
+                # Start async crawl job
+                fc_body = {"url": start_url, "limit": max_pages}
+                if max_depth:
+                    fc_body["maxDepth"] = max_depth
+                fc_resp = await client.post(
+                    "https://api.firecrawl.dev/v1/crawl",
+                    json=fc_body, headers=fc_headers,
+                )
+                if fc_resp.status_code == 200:
+                    fc_data = fc_resp.json()
+                    if fc_data.get("success") and fc_data.get("id"):
+                        job_id = fc_data["id"]
+                        # Poll for completion (max 60s)
+                        for _ in range(30):
+                            await asyncio.sleep(2.0)
+                            poll_resp = await client.get(
+                                f"https://api.firecrawl.dev/v1/crawl/{job_id}",
+                                headers=fc_headers,
+                            )
+                            if poll_resp.status_code == 200:
+                                poll_data = poll_resp.json()
+                                status = poll_data.get("status")
+                                if status == "completed":
+                                    fc_pages = poll_data.get("data", [])
+                                    elapsed_ms = int((time.monotonic() - start_time) * 1000)
+                                    await log_source_call(
+                                        source_name="site_crawler",
+                                        source_type="api",
+                                        query_params={"start_url": start_url, "max_pages": max_pages},
+                                        status="success",
+                                        duration_ms=elapsed_ms,
+                                        run_id=run_id,
+                                        records_count=len(fc_pages),
+                                    )
+                                    # Build combined_text for schema compatibility with BFS path
+                                    combined_text = "\n\n".join(p.get("markdown", "") for p in fc_pages)
+                                    return {
+                                        "status": "success",
+                                        "provider": "firecrawl",
+                                        "start_url": start_url,
+                                        "domain": base_domain,
+                                        "pages": [
+                                            {
+                                                "url": (p.get("metadata") or {}).get("url", ""),
+                                                "title": p.get("metadata", {}).get("title", ""),
+                                                "content": p.get("markdown", ""),
+                                                "fit_markdown": p.get("markdown", ""),
+                                            }
+                                            for p in fc_pages
+                                        ],
+                                        "pages_crawled": len(fc_pages),
+                                        "combined_text": combined_text[:50000],
+                                        "link_graph": {},
+                                        "meta": {
+                                            "total_pages": len(fc_pages),
+                                            "max_pages": max_pages,
+                                            "max_depth": max_depth,
+                                            "latency_ms": elapsed_ms,
+                                            "crawl_engine": "firecrawl",
+                                        },
+                                    }
+                                elif status in ("failed", "cancelled"):
+                                    break  # fall through to BFS
+    except Exception:
+        logger.warning("Firecrawl crawl path failed, falling back to BFS", exc_info=True)
 
     # BFS queue: (url, depth)
     queue: deque[tuple[str, int]] = deque([(start_url, 0)])

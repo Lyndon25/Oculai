@@ -15,6 +15,7 @@ from oculai_mcp.db import broadcasts as broadcast_db
 from oculai_mcp.tools import candidates, evidence, assessment, sources, report
 from oculai_mcp.tools import web_search, outreach, browser, deep_search as deep_search_tool, site_crawler
 from oculai_mcp.tools import review_orchestrator as review
+from oculai_mcp.tools import firecrawl_scrape
 
 mcp = FastMCP(
     "Oculai Talent Sourcing",
@@ -472,6 +473,34 @@ async def oculai_get_search_progress(run_id: str) -> dict[str, Any]:
     """
     from uuid import UUID
     return await deep_search_tool.get_search_progress(UUID(run_id))
+
+
+@mcp.tool
+async def oculai_firecrawl_scrape(
+    url: str,
+    formats: list[str] | None = None,
+    wait_for: int | None = None,
+    run_id: str | None = None,
+) -> dict[str, Any]:
+    """Scrape a single web page via Firecrawl and return clean markdown.
+
+    Supports static HTML, JavaScript SPAs (use wait_for for rendering),
+    and PDF parsing. Uses keyless mode when no API key is configured.
+    Get a free API key at https://firecrawl.dev/app/api-keys for higher limits.
+
+    Args:
+        url: The URL to scrape
+        formats: Output formats — ["markdown"] (default), ["html"], etc.
+        wait_for: Milliseconds to wait for JS rendering (e.g., 5000 for SPAs)
+        run_id: Optional run UUID for provenance tracking
+    """
+    from uuid import UUID
+    return await firecrawl_scrape.scrape_page(
+        url=url,
+        formats=formats,
+        wait_for=wait_for,
+        run_id=UUID(run_id) if run_id else None,
+    )
 
 
 @mcp.tool
@@ -1042,14 +1071,14 @@ async def oculai_search_web(
     include_domains: list[str] | None = None,
     exclude_domains: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Search the web for candidate-related content via Exa or Tavily.
+    """Search the web for candidate-related content via Exa, Tavily, or Firecrawl.
 
     Useful for discovering candidates mentioned in news, company pages,
     tech blogs, and forums that academic databases miss.
 
     Args:
         keywords: Search keyword list
-        provider: "tavily" (default) or "exa"
+        provider: "tavily" (default), "exa", or "firecrawl" (keyless, no API key required)
         run_id: Optional run UUID for provenance tracking
         limit: Max results (default 20)
         include_domains: Optional domain whitelist (e.g. ["linkedin.com"])

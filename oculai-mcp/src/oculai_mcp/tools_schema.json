@@ -173,6 +173,35 @@
         ]
       }
     },
+    "oculai_firecrawl_scrape": {
+      "description": "Scrape a single web page via Firecrawl and return clean markdown.",
+      "group": "Source Tools",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The URL to scrape"
+          },
+          "formats": {
+            "type": "string",
+            "description": "Output formats (\"markdown\" default, \"html\", \"screenshot\")",
+            "default": null
+          },
+          "wait_for": {
+            "type": "integer",
+            "description": "Milliseconds to wait for JS rendering (e.g., 5000 for SPAs)",
+            "default": null
+          },
+          "run_id": {
+            "type": "string",
+            "description": "Optional run UUID for provenance tracking",
+            "default": null
+          }
+        },
+        "required": ["url"]
+      }
+    },
     "oculai_crawl_site": {
       "description": "Crawl a website starting from a URL to discover deep candidate evidence.",
       "group": "Source Tools",
@@ -689,7 +718,7 @@
       }
     },
     "oculai_search_web": {
-      "description": "Search the web for candidate-related content via Exa or Tavily.",
+      "description": "Search the web for candidate-related content via Exa, Tavily, or Firecrawl.",
       "group": "Web Search, Outreach & Browser",
       "parameters": {
         "type": "object",

@@ -73,6 +73,7 @@ def _register_api_sources() -> None:
         from oculai_mcp.sources.zhihu import ZhihuSource
         from oculai_mcp.sources.csdn import CSDNSource
         from oculai_mcp.sources.duckduckgo import DuckDuckGoSource
+        from oculai_mcp.sources.firecrawl import FirecrawlSource
 
         registered = []
         if settings.source_enable_arxiv:
@@ -107,6 +108,8 @@ def _register_api_sources() -> None:
             register_source("csdn", CSDNSource); registered.append("csdn")
         if settings.source_enable_duckduckgo:
             register_source("duckduckgo", DuckDuckGoSource); registered.append("duckduckgo")
+        if settings.source_enable_firecrawl:
+            register_source("firecrawl", FirecrawlSource); registered.append("firecrawl")
 
         logger.info("Registered sources: %s", ", ".join(registered))
     except ImportError as e:

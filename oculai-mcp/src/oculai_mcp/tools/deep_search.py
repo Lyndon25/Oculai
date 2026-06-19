@@ -768,8 +768,8 @@ async def _enrich_with_site_crawl(
                     "person_id": str(person_id),
                     "name": name,
                     "url": url,
-                    "pages_crawled": crawl_result.get("pages_crawled", 0),
-                    "combined_text_length": len(crawl_result.get("combined_text", "")),
+                    "pages_crawled": crawl_result.get("pages_crawled", crawl_result.get("meta", {}).get("total_pages", 0)),
+                    "combined_text_length": len(crawl_result.get("combined_text", "") or ""),
                 })
         except Exception as e:
             logger.warning("Site crawl failed for %s (%s): %s", name, url, e)

@@ -270,6 +270,22 @@ export const OCULAI_TOOLS: Record<
       required: ["session_id"],
     },
   },
+
+  // Source Tools
+  oculai_firecrawl_scrape: {
+    description: "Scrape a single web page via Firecrawl and return clean markdown.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string" },
+        formats: { type: "string" },
+        wait_for: { type: "integer" },
+        run_id: { type: "string" }
+      },
+      required: ["url"],
+    },
+  },
+
   // Generated Drift Fix
   oculai_get_broadcasts: {
     description: "Get all unconsumed broadcasts from other agents in this run.",

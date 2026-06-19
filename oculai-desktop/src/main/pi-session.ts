@@ -180,6 +180,8 @@ Deep-dive candidate profiles to gather comprehensive evidence. Chinese platforms
 ## Available Tools
 - oculai_fetch_source_detail — deep profile lookups on specific platforms
 - oculai_crawl_site — BFS crawl personal homepages, lab pages
+- oculai_firecrawl_scrape — single-page scrape via Firecrawl (keyless)
+- oculai_search_web — web search (firecrawl/tavily/exa)
 - oculai_capture_page_evidence — capture web-based profiles as evidence
 - oculai_attach_evidence — attach findings with auto-assigned quality tier
 
